@@ -312,7 +312,7 @@ Happy recording!`);
   const [centerPaddingVh, setCenterPaddingVh] = useState(45);
   const [showCenterLine, setShowCenterLine] = useState(false);
   const [showAim, setShowAim] = useState(true);
-  const [showHighlight, setShowHighlight] = useState(true);
+  const [showHighlight, setShowHighlight] = useState(false);
   const [aimOffsetX, setAimOffsetX] = useState(0);
   const [aimOffsetY, setAimOffsetY] = useState(0);
   // Aim marker style/color + hideable "Listening" pill — added after user
@@ -648,6 +648,7 @@ Happy recording!`);
     lookaheadWindow: 10,
     centerPaddingVh: 45,
     showAim: true,
+    showHighlight: false,
     aimOffsetX: 0,
     aimOffsetY: 0,
     aimStyle: "crosshair",
@@ -678,6 +679,7 @@ Happy recording!`);
     setLookaheadWindow(defaultSettings.lookaheadWindow);
     setCenterPaddingVh(defaultSettings.centerPaddingVh);
     setShowAim(defaultSettings.showAim);
+    setShowHighlight(defaultSettings.showHighlight);
     setAimOffsetX(defaultSettings.aimOffsetX);
     setAimOffsetY(defaultSettings.aimOffsetY);
     setAimStyle(defaultSettings.aimStyle);
