@@ -323,6 +323,7 @@ Happy recording!`);
   const [showListeningIndicator, setShowListeningIndicator] = useState(true);
   // Co-host lines (">>" / "@Name:") — dim them and let voice tracking skip them
   const [skipCoHostLines, setSkipCoHostLines] = useState(true);
+  const [resetTriggerWord, setResetTriggerWord] = useState("pickle");
   const [lineIsCoHost, setLineIsCoHost] = useState([]);
   // Toolbar overflow hints (mobile): which directions have hidden icons
   const [toolbarHints, setToolbarHints] = useState({
@@ -407,6 +408,8 @@ Happy recording!`);
   const lineIsCoHostRef = useRef([]);
   const skippableWordsRef = useRef([]);
   const skipCoHostRef = useRef(true);
+  const resetTriggerWordRef = useRef("pickle");
+  const lastResetTriggerTsRef = useRef(0);
   const isListeningRef = useRef(false);
   const currentWordIndexRef = useRef(-1);
   const textContainerRef = useRef(null);
@@ -495,6 +498,22 @@ Happy recording!`);
       // Split σε tokens ΑΜΑ υπάρχει τουλάχιστον μία λέξη
       const tokens = transcript.split(/\s+/).map(normalizeWord).filter(Boolean);
       if (tokens.length === 0) return;
+
+      const triggerToken = normalizeWord(resetTriggerWordRef.current || "");
+      if (
+        triggerToken &&
+        tokens.some(
+          (tok) => tok === triggerToken || tok === `${triggerToken}s`
+        )
+      ) {
+        const now = performance.now();
+        if (now - lastResetTriggerTsRef.current > 1000) {
+          lastResetTriggerTsRef.current = now;
+          resetPosition();
+          safeRestartRecognition(50);
+        }
+        return;
+      }
 
       const isFinal = !!(chosen && chosen.isFinal);
 
@@ -635,6 +654,7 @@ Happy recording!`);
     aimColor: "#ffeb3b",
     showListeningIndicator: true,
     skipCoHostLines: true,
+    resetTriggerWord: "pickle",
     textOpacity: 0.8,
     aimOpacity: 1,
     uiOpacity: 0.9,
@@ -664,6 +684,7 @@ Happy recording!`);
     setAimColor(defaultSettings.aimColor);
     setShowListeningIndicator(defaultSettings.showListeningIndicator);
     setSkipCoHostLines(defaultSettings.skipCoHostLines);
+    setResetTriggerWord(defaultSettings.resetTriggerWord);
     setTextOpacity(defaultSettings.textOpacity);
     setAimOpacity(defaultSettings.aimOpacity);
     setUiOpacity(defaultSettings.uiOpacity);
@@ -905,6 +926,8 @@ Happy recording!`);
       if (s.showListeningIndicator != null)
         setShowListeningIndicator(s.showListeningIndicator);
       if (s.skipCoHostLines != null) setSkipCoHostLines(s.skipCoHostLines);
+      if (typeof s.resetTriggerWord === "string")
+        setResetTriggerWord(s.resetTriggerWord);
       if (s.textOpacity != null) setTextOpacity(s.textOpacity);
       if (s.aimOpacity != null) setAimOpacity(s.aimOpacity);
       if (s.uiOpacity != null) setUiOpacity(s.uiOpacity);
@@ -944,6 +967,7 @@ Happy recording!`);
         aimColor,
         showListeningIndicator,
         skipCoHostLines,
+        resetTriggerWord,
         textOpacity,
         aimOpacity,
         uiOpacity,
@@ -979,6 +1003,7 @@ Happy recording!`);
     aimColor,
     showListeningIndicator,
     skipCoHostLines,
+    resetTriggerWord,
     textOpacity,
     aimOpacity,
     uiOpacity,
@@ -1629,6 +1654,9 @@ Happy recording!`);
   useEffect(() => {
     isListeningRef.current = isListening;
   }, [isListening]);
+  useEffect(() => {
+    resetTriggerWordRef.current = resetTriggerWord;
+  }, [resetTriggerWord]);
   useEffect(() => {
     currentWordIndexRef.current = currentWordIndex;
   }, [currentWordIndex]);
@@ -3567,6 +3595,42 @@ Happy recording!`);
                 >
                   Start a line with &gt;&gt; or @Name: to mark it as another
                   speaker's — it shows dimmed and voice tracking skips it
+                </div>
+              </div>
+
+              <div style={{ marginBottom: "20px" }}>
+                <label
+                  htmlFor="reset-trigger-word-input"
+                  style={{
+                    color: "white",
+                    display: "block",
+                    marginBottom: "8px",
+                  }}
+                >
+                  Voice reset trigger word
+                </label>
+                <input
+                  id="reset-trigger-word-input"
+                  type="text"
+                  value={resetTriggerWord}
+                  onChange={(e) => setResetTriggerWord(e.target.value)}
+                  placeholder="pickle"
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid #555",
+                    background: "#222",
+                    color: "white",
+                    fontSize: "14px",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div
+                  style={{ color: "#aaa", fontSize: "12px", marginTop: "4px" }}
+                >
+                  Say this word aloud while listening to jump back to the top
+                  (leave blank to disable)
                 </div>
               </div>
 
