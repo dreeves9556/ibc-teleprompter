@@ -295,7 +295,7 @@ Happy recording!`);
 
   const [fontSize, setFontSize] = useState(90);
   const [margin, setMargin] = useState(20);
-  const [lineHeight, setLineHeight] = useState(1.5);
+  const [lineHeight, setLineHeight] = useState(1.2);
   const [scrollSpeed, setScrollSpeed] = useState(88);
   const [bgColor, setBgColor] = useState("#000000");
   const [textColor, setTextColor] = useState("#ffffff");
@@ -639,7 +639,7 @@ Happy recording!`);
   const defaultSettings = {
     fontSize: 90,
     margin: 20,
-    lineHeight: 1.5,
+    lineHeight: 1.2,
     scrollSpeed: 94,
     bgColor: "#000000",
     textColor: "#ffffff",
