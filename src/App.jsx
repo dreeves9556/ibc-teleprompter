@@ -293,7 +293,7 @@ This project is completely free and open source. If you find it useful, consider
 
 Happy recording!`);
 
-  const [fontSize, setFontSize] = useState(32);
+  const [fontSize, setFontSize] = useState(90);
   const [margin, setMargin] = useState(20);
   const [lineHeight, setLineHeight] = useState(1.5);
   const [scrollSpeed, setScrollSpeed] = useState(88);
@@ -618,7 +618,7 @@ Happy recording!`);
 
   const SETTINGS_KEY = "tp_settings_v1";
   const defaultSettings = {
-    fontSize: 32,
+    fontSize: 90,
     margin: 20,
     lineHeight: 1.5,
     scrollSpeed: 94,
@@ -2118,7 +2118,7 @@ Happy recording!`);
           required: ["size"],
         },
         async execute({ size } = {}) {
-          const v = clampNum(size, 12, 200, 32);
+          const v = clampNum(size, 12, 200, 90);
           webmcpApiRef.current.setFontSize(v);
           return ok(`Font size set to ${v}px.`);
         },
@@ -2974,15 +2974,49 @@ Happy recording!`);
               </button>
 
               <div style={{ marginBottom: "20px" }}>
-                <label
+                <div
                   style={{
-                    color: "white",
-                    display: "block",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
                     marginBottom: "8px",
                   }}
                 >
-                  Font size: {fontSize}px
-                </label>
+                  <label
+                    htmlFor="font-size-input"
+                    style={{
+                      color: "white",
+                      display: "block",
+                    }}
+                  >
+                    Font size: {fontSize}px
+                  </label>
+                  <input
+                    id="font-size-input"
+                    type="number"
+                    min={16}
+                    max={200}
+                    value={fontSize}
+                    aria-label="Font size"
+                    onChange={(e) => {
+                      if (e.target.value === "") return;
+                      const val = Number(e.target.value);
+                      if (!Number.isNaN(val)) {
+                        setFontSize(Math.max(16, Math.min(200, Math.round(val))));
+                      }
+                    }}
+                    style={{
+                      width: "70px",
+                      padding: "4px 8px",
+                      borderRadius: "6px",
+                      border: "1px solid #555",
+                      background: "#222",
+                      color: "white",
+                      fontSize: "14px",
+                      textAlign: "right",
+                    }}
+                  />
+                </div>
                 <div
                   className="custom-slider"
                   onClick={(e) => {
@@ -2991,8 +3025,8 @@ Happy recording!`);
                     const rect = e.currentTarget.getBoundingClientRect();
                     const x = e.clientX - rect.left;
                     const percentage = x / rect.width;
-                    const newValue = Math.round(16 + percentage * (80 - 16));
-                    setFontSize(Math.max(16, Math.min(80, newValue)));
+                    const newValue = Math.round(16 + percentage * (200 - 16));
+                    setFontSize(Math.max(16, Math.min(200, newValue)));
                   }}
                 >
                   <div className="custom-slider-track" />
@@ -3000,7 +3034,7 @@ Happy recording!`);
                     className="custom-slider-thumb"
                     style={{
                       left: `calc(${
-                        ((fontSize - 16) / (80 - 16)) * 100
+                        ((fontSize - 16) / (200 - 16)) * 100
                       }% - 8px)`,
                     }}
                     onMouseDown={(e) => {
@@ -3009,7 +3043,7 @@ Happy recording!`);
                       const startValue = fontSize;
                       const rect =
                         e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 80;
+                      const maxValue = 200;
                       const minValue = 16;
 
                       const handleMouseMove = (moveEvent) => {
