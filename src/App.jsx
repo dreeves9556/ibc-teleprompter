@@ -1969,15 +1969,16 @@ Happy recording!`);
       autoScrollInterval.current = null;
     }
     autoLastTsRef.current = 0;
-
-    // Stop listening
-    try {
-      if (recognitionRef.current) recognitionRef.current.stop();
-    } catch (_) {}
-    setIsListening(false);
     setIsPlaying(false);
 
-    // Reset indices and trackers
+    // Cancel any ongoing smooth scroll animation and clear interaction pause
+    scrollAnimTokenRef.current++;
+    setUserIsInteracting(false);
+    if (userInteractTimeoutRef.current) {
+      clearTimeout(userInteractTimeoutRef.current);
+    }
+
+    // Reset indices and trackers while keeping microphone listening active
     prevLineIdxRef.current = -1;
     prevVisualLineIdxRef.current = -1;
     currentWordIndexRef.current = -1;
