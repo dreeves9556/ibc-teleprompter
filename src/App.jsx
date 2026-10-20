@@ -466,6 +466,11 @@ Happy recording!`);
     rec.onstart = () => {
       recognizingRef.current = true;
       micForceStoppedRef && (micForceStoppedRef.current = false);
+      const now = performance.now();
+      lastMicResultTsRef.current = now;
+      try {
+        window.__lastMicResultTs = now;
+      } catch (_) {}
     };
 
     rec.onresult = (event) => {
@@ -507,44 +512,75 @@ Happy recording!`);
       setIsSpeaking(true);
       if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
       speakingTimeoutRef.current = setTimeout(() => setIsSpeaking(false), 1000);
+      const nowTs = performance.now();
       try {
-        window.__lastMicResultTs = performance.now();
+        window.__lastMicResultTs = nowTs;
       } catch (_) {}
-      lastMicResultTsRef.current = performance.now();
+      lastMicResultTsRef.current = nowTs;
 
-      const startIndex = Math.max(currentWordIndexRef.current + 1, 0);
-      const currentLine = getLineIdxForWord(currentWordIndexRef.current);
+      let startIndex = Math.max(currentWordIndexRef.current + 1, 0);
+      const isNearStart = currentWordIndexRef.current < 5;
+      const effectiveWindow = isNearStart
+        ? Math.max(lookaheadWindow, 30)
+        : lookaheadWindow;
+      const effectiveSoftSkip = isNearStart ? 6 : 3;
 
-      let nextIndex = -1;
-      for (const tokens of altTokenLists) {
-        const tokensToUse =
-          !isFinal && tokens.length > 3 ? tokens.slice(-3) : tokens;
-
-        nextIndex = findNextInLine(
-          tokensToUse,
-          startIndex,
-          currentLine,
+      const matchWindow = (tokensSlice, fromIdx) => {
+        const lineIdx = getLineIdxForWord(fromIdx);
+        let idxMatch = findNextInLine(
+          tokensSlice,
+          fromIdx,
+          lineIdx,
           6,
-          3,
+          effectiveSoftSkip,
           true
         );
-        if (nextIndex === -1) {
-          nextIndex = findNextInLine(
-            tokensToUse,
-            startIndex,
-            currentLine,
+        if (idxMatch === -1) {
+          idxMatch = findNextInLine(
+            tokensSlice,
+            fromIdx,
+            lineIdx,
             undefined,
-            3,
+            effectiveSoftSkip,
             true
           );
         }
-        if (nextIndex === -1) {
-          const { index } = tryAdvanceByTokens(tokensToUse, startIndex, {
-            maxWindow: lookaheadWindow,
-            maxSoftSkip: 3,
+        if (idxMatch === -1) {
+          const { index } = tryAdvanceByTokens(tokensSlice, fromIdx, {
+            maxWindow: effectiveWindow,
+            maxSoftSkip: effectiveSoftSkip,
           });
-          nextIndex = index;
+          idxMatch = index;
         }
+        return idxMatch;
+      };
+
+      let nextIndex = -1;
+      for (const tokens of altTokenLists) {
+        const recent =
+          !isFinal && tokens.length > 6 ? tokens.slice(-6) : tokens;
+        const tokensToUse =
+          recent.length > 3 ? recent.slice(-3) : recent;
+
+        nextIndex = matchWindow(tokensToUse, startIndex);
+
+        // If a multi-word burst arrived at once (common on the first spoken
+        // line while the mic initializes), walk forward through earlier
+        // tokens in the burst so the opening words aren't skipped over.
+        if (nextIndex === -1 && recent.length > 1) {
+          let walkIdx = -1;
+          let curStart = startIndex;
+          for (let end = Math.min(3, recent.length); end <= recent.length; end++) {
+            const win = recent.slice(Math.max(0, end - 3), end);
+            const stepMatch = matchWindow(win, curStart);
+            if (stepMatch !== -1 && stepMatch >= curStart) {
+              walkIdx = stepMatch;
+              curStart = stepMatch + 1;
+            }
+          }
+          if (walkIdx !== -1) nextIndex = walkIdx;
+        }
+
         if (nextIndex !== -1) break;
       }
       if (nextIndex !== -1) setCurrentWordIndex(nextIndex);
@@ -586,8 +622,20 @@ Happy recording!`);
   }
 
   function safeRestartRecognition(delayMs = 150) {
+    if (micRestartTimeoutRef.current) {
+      clearTimeout(micRestartTimeoutRef.current);
+      micRestartTimeoutRef.current = null;
+    }
+    const now = performance.now();
+    lastMicResultTsRef.current = now;
+    try {
+      window.__lastMicResultTs = now;
+    } catch (_) {}
     try {
       if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onstart = null;
+        } catch (_) {}
         try {
           recognitionRef.current.onresult = null;
         } catch (_) {}
@@ -605,14 +653,19 @@ Happy recording!`);
         } catch (_) {}
       }
     } catch (_) {}
+    recognizingRef.current = false;
     try {
       const SpeechRecognition =
         window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) return;
       const rec = new SpeechRecognition();
       recognitionRef.current = attachRecognitionHandlers(rec);
-      setTimeout(() => {
+      micRestartTimeoutRef.current = setTimeout(() => {
+        micRestartTimeoutRef.current = null;
         try {
+          const startNow = performance.now();
+          lastMicResultTsRef.current = startNow;
+          window.__lastMicResultTs = startNow;
           recognitionRef.current && recognitionRef.current.start();
         } catch (_) {}
       }, Math.max(0, delayMs));
@@ -1469,8 +1522,8 @@ Happy recording!`);
     const containerRect = container.getBoundingClientRect();
     const wordRect = wordElement.getBoundingClientRect();
     const contentY = container.scrollTop + (wordRect.top - containerRect.top);
-    const approxLinePx = Math.max(1, fontSize * lineHeight * 1.0);
-    return Math.floor(contentY / approxLinePx);
+    const stepPx = Math.max(8, fontSize * 0.45);
+    return Math.round(contentY / stepPx);
   };
 
   const getWordAnchorDelta = (wIdx) => {
@@ -1582,10 +1635,9 @@ Happy recording!`);
   useEffect(() => {
     let rafId = null;
     let lastResultTs = performance.now();
+    lastMicResultTsRef.current = lastResultTs;
     try {
-      if (typeof window.__lastMicResultTs === "number")
-        lastResultTs = window.__lastMicResultTs;
-      else window.__lastMicResultTs = lastResultTs;
+      window.__lastMicResultTs = lastResultTs;
     } catch (_) {}
     const tick = () => {
       const active = isListening || isPlaying;
@@ -1607,15 +1659,26 @@ Happy recording!`);
           if (typeof window.__lastMicResultTs === "number")
             lastResultTs = window.__lastMicResultTs;
         } catch (_) {}
-        if (now - lastResultTs > 4000 && recognizingRef.current) {
-          // if no audio detected for 4s, stop gracefully to release mic
+        if (now - lastResultTs > 10000 && recognizingRef.current) {
+          // if no audio detected for 10s, stop gracefully so onend restarts cleanly
+          lastResultTs = now;
+          lastMicResultTsRef.current = now;
           try {
+            window.__lastMicResultTs = now;
             recognitionRef.current.stop?.();
           } catch (_) {}
-        } else if (now - lastResultTs > 5000 && !recognizingRef.current) {
+        } else if (
+          now - lastResultTs > 11000 &&
+          !recognizingRef.current &&
+          !micRestartTimeoutRef.current
+        ) {
           // if stopped due to silence, restart cleanly
+          lastResultTs = now;
+          lastMicResultTsRef.current = now;
+          try {
+            window.__lastMicResultTs = now;
+          } catch (_) {}
           safeRestartRecognition(200);
-          lastResultTs = performance.now();
         }
       }
       rafId = requestAnimationFrame(tick);
@@ -1644,6 +1707,12 @@ Happy recording!`);
     };
     const onScroll = () => {
       if (programmaticScrollRef.current) return;
+      if (el.scrollTop <= 30 && currentWordIndexRef.current > 0) {
+        currentWordIndexRef.current = -1;
+        setCurrentWordIndex(-1);
+        prevLineIdxRef.current = -1;
+        prevVisualLineIdxRef.current = -1;
+      }
       // If active modes are on, ignore manual scroll so it never stalls
       if (isListening || isPlaying) return;
       markInteract();
@@ -1765,11 +1834,11 @@ Happy recording!`);
   };
 
   const getLineIdxForWord = (wIdx) => {
-    if (wIdx < 0) return 0;
+    const targetIdx = Math.max(0, wIdx);
     const starts = lineStartIndexRef.current;
     let lineIdx = 0;
     for (let i = 0; i < starts.length; i++) {
-      if (starts[i] <= wIdx) lineIdx = i;
+      if (starts[i] <= targetIdx) lineIdx = i;
       else break;
     }
     return lineIdx;
@@ -1894,6 +1963,19 @@ Happy recording!`);
           try {
             micForceStoppedRef.current = false;
           } catch (_) {}
+        }
+        const now = performance.now();
+        lastMicResultTsRef.current = now;
+        try {
+          window.__lastMicResultTs = now;
+        } catch (_) {}
+        if (
+          textContainerRef.current &&
+          textContainerRef.current.scrollTop <= 50 &&
+          currentWordIndexRef.current > 0
+        ) {
+          currentWordIndexRef.current = -1;
+          setCurrentWordIndex(-1);
         }
         safeRestartRecognition(150);
         setIsListening(true);
