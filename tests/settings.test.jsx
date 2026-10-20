@@ -56,6 +56,7 @@ describe("Settings persistence", () => {
     const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
     expect(saved.bgColor).toBe("#111111");
     expect(saved.textColor).toBe("#00ff00");
+    expect(saved.showHighlight).toBe(true);
   });
 
   it("includes script text in saved settings", async () => {

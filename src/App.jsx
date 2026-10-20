@@ -46,6 +46,290 @@ function Icon({ name }) {
 // the co-host's part is.
 const CO_HOST_LINE_RE = /^\s*(>>|@[^\s:]{1,30}:)/;
 
+const LANGUAGES_LIST = [
+  { code: "en-US", label: "🇺🇸 English (US)" },
+  { code: "en-GB", label: "🇬🇧 English (UK)" },
+  { code: "es-ES", label: "🇪🇸 Español (España)" },
+  { code: "es-MX", label: "🇲🇽 Español (México)" },
+  { code: "fr-FR", label: "🇫🇷 Français" },
+  { code: "de-DE", label: "🇩🇪 Deutsch" },
+  { code: "it-IT", label: "🇮🇹 Italiano" },
+  { code: "pt-BR", label: "🇧🇷 Português (Brasil)" },
+  { code: "pt-PT", label: "🇵🇹 Português (Portugal)" },
+  { code: "ru-RU", label: "🇷🇺 Русский" },
+  { code: "zh-CN", label: "🇨🇳 中文 (简体)" },
+  { code: "ja-JP", label: "🇯🇵 日本語" },
+  { code: "ko-KR", label: "🇰🇷 한국어" },
+  { code: "ar-SA", label: "🇸🇦 العربية" },
+  { code: "hi-IN", label: "🇮🇳 हिन्दी" },
+  { code: "tr-TR", label: "🇹🇷 Türkçe" },
+  { code: "nl-NL", label: "🇳🇱 Nederlands" },
+  { code: "el-GR", label: "🇬🇷 Ελληνικά" },
+  { code: "pl-PL", label: "🇵🇱 Polski" },
+  { code: "sv-SE", label: "🇸🇪 Svenska" },
+];
+
+const MULTI_WORD_CONTRACTIONS = {
+  gonna: ["going", "to"],
+  wanna: ["want", "to"],
+  gotta: ["got", "to"],
+  outta: ["out", "of"],
+  kinda: ["kind", "of"],
+  sorta: ["sort", "of"],
+  oughta: ["ought", "to"],
+  hafta: ["have", "to"],
+  yall: ["you", "all"],
+  yalls: ["your"],
+  allofem: ["all", "of", "them"],
+  lemme: ["let", "me"],
+  gimme: ["give", "me"],
+  dunno: ["dont", "know"],
+  imma: ["i", "am", "going", "to"],
+  ima: ["i", "am", "going", "to"],
+  fixin: ["fixing"],
+  finna: ["fixing", "to"],
+};
+
+const DIALECT_EQUIVALENTS = {
+  fer: ["for", "far"],
+  fur: ["for"],
+  yer: ["your", "youre"],
+  yore: ["your", "youre"],
+  are: ["our", "hour"],
+  our: ["are", "hour"],
+  hour: ["our", "are"],
+  all: ["oil"],
+  oil: ["all"],
+  rat: ["right"],
+  rite: ["right"],
+  raht: ["right"],
+  far: ["fire", "for"],
+  fahr: ["fire"],
+  tar: ["tire", "tired"],
+  tahr: ["tire"],
+  git: ["get"],
+  jist: ["just"],
+  jest: ["just"],
+  kin: ["can"],
+  pin: ["pen"],
+  pen: ["pin"],
+  tin: ["ten"],
+  ten: ["tin"],
+  fill: ["feel"],
+  feel: ["fill"],
+  still: ["steel"],
+  steel: ["still"],
+  hill: ["heel", "heal"],
+  sale: ["sell"],
+  sell: ["sale"],
+  tail: ["tell"],
+  tell: ["tail"],
+  wont: ["want"],
+  want: ["wont"],
+  aint: ["isnt", "arent", "am", "hasnt", "havent"],
+  em: ["them"],
+  bout: ["about"],
+  cause: ["because"],
+  cuz: ["because"],
+  cos: ["because"],
+  til: ["until"],
+  nothin: ["nothing"],
+  somethin: ["something"],
+  everythin: ["everything"],
+  anythin: ["anything"],
+  doin: ["doing"],
+  goin: ["going"],
+  comin: ["coming"],
+  sayin: ["saying"],
+  talkin: ["talking"],
+  walkin: ["walking"],
+  workin: ["working"],
+  lookin: ["looking"],
+  thinkin: ["thinking"],
+  tryin: ["trying"],
+  runnin: ["running"],
+  gettin: ["getting"],
+  makin: ["making"],
+  takin: ["taking"],
+};
+
+const expandDialectTokens = (tokens) => {
+  const out = [];
+  for (const tok of tokens) {
+    if (!tok) continue;
+    if (MULTI_WORD_CONTRACTIONS[tok]) {
+      out.push(...MULTI_WORD_CONTRACTIONS[tok]);
+    } else {
+      out.push(tok);
+    }
+  }
+  return out;
+};
+
+const getPhoneticSkeleton = (word) => {
+  if (!word || word.length < 3) return word;
+  const w = word
+    .replace(/^kn/, "n")
+    .replace(/^wr/, "r")
+    .replace(/^wh/, "w")
+    .replace(/ph/g, "f")
+    .replace(/ck/g, "k")
+    .replace(/dg/g, "j")
+    .replace(/ght/g, "t")
+    .replace(/gh/g, "")
+    .replace(/in$/, "ing");
+  const first = w[0];
+  const rest = w
+    .slice(1)
+    .replace(/[aeiouy]/g, "")
+    .replace(/(.)\1+/g, "$1");
+  return first + rest;
+};
+
+const withinEditDistance = (a, b, maxDist) => {
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > maxDist) return false;
+  const prev = new Array(lb + 1);
+  const curr = new Array(lb + 1);
+  for (let j = 0; j <= lb; j++) prev[j] = j;
+  for (let i = 1; i <= la; i++) {
+    curr[0] = i;
+    let rowMin = curr[0];
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      if (curr[j] < rowMin) rowMin = curr[j];
+    }
+    if (rowMin > maxDist) return false;
+    for (let j = 0; j <= lb; j++) prev[j] = curr[j];
+  }
+  return prev[lb] <= maxDist;
+};
+
+const tokensEqual = (a, b) => {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 4 && b.length >= 4 && (a === b + "g" || b === a + "g"))
+    return true;
+  const eqA = DIALECT_EQUIVALENTS[a];
+  if (eqA && eqA.includes(b)) return true;
+  const eqB = DIALECT_EQUIVALENTS[b];
+  if (eqB && eqB.includes(a)) return true;
+  return false;
+};
+
+const tokensSoftMatch = (target, token, targetSkel) => {
+  if (!target || !token) return false;
+  if (tokensEqual(target, token)) return true;
+  if (
+    token.length >= 3 &&
+    (target.startsWith(token) || token.startsWith(target))
+  )
+    return true;
+  if (token.length >= 4 && (target.includes(token) || token.includes(target)))
+    return true;
+  if (target.length >= 4 && token.length >= 4) {
+    const maxDist = target.length >= 6 && token.length >= 6 ? 2 : 1;
+    if (withinEditDistance(target, token, maxDist)) return true;
+  }
+  if (target.length >= 3 && token.length >= 3 && target[0] === token[0]) {
+    const skelA = targetSkel ?? getPhoneticSkeleton(target);
+    const skelB = getPhoneticSkeleton(token);
+    if (skelA.length >= 2 && skelA === skelB) return true;
+  }
+  return false;
+};
+
+const normalizeWord = (input) => {
+  if (!input) return "";
+  return input
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ς/g, "σ")
+    .replace(/[^a-zA-Zα-ω0-9]+/g, "")
+    .trim();
+};
+
+function CustomSlider({
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  onDragStart,
+  onDragEnd,
+}) {
+  const trackRef = useRef(null);
+  const roundToStep = (v) => {
+    const inv = Math.round(1 / step);
+    const rounded = inv > 1 ? Math.round(v * inv) / inv : Math.round(v);
+    return Math.max(min, Math.min(max, rounded));
+  };
+
+  const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
+
+  const startDrag = (startX) => {
+    if (!trackRef.current) return;
+    onDragStart && onDragStart();
+    const startValue = value;
+    const rect = trackRef.current.getBoundingClientRect();
+
+    const updateFromClientX = (clientX) => {
+      if (!rect.width) return;
+      const deltaValue = ((clientX - startX) / rect.width) * (max - min);
+      onChange(roundToStep(startValue + deltaValue));
+    };
+
+    const handleMouseMove = (e) => updateFromClientX(e.clientX);
+    const handleTouchMove = (e) => {
+      if (e.touches && e.touches[0]) updateFromClientX(e.touches[0].clientX);
+    };
+    const cleanup = () => {
+      onDragEnd && onDragEnd();
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", cleanup);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", cleanup);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", cleanup);
+    document.addEventListener("touchmove", handleTouchMove, { passive: true });
+    document.addEventListener("touchend", cleanup);
+  };
+
+  return (
+    <div
+      ref={trackRef}
+      className="custom-slider"
+      onClick={(e) => {
+        if (e.target.classList.contains("custom-slider-thumb")) return;
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (!rect.width) return;
+        const percentage = (e.clientX - rect.left) / rect.width;
+        onChange(roundToStep(min + percentage * (max - min)));
+      }}
+      onMouseDown={() => onDragStart && onDragStart()}
+      onMouseUp={() => onDragEnd && onDragEnd()}
+    >
+      <div className="custom-slider-track" />
+      <div
+        className="custom-slider-thumb"
+        style={{ left: `calc(${pct}% - 8px)` }}
+        onMouseDown={(e) => {
+          e.preventDefault();
+          startDrag(e.clientX);
+        }}
+        onTouchStart={(e) => {
+          if (e.touches && e.touches[0]) startDrag(e.touches[0].clientX);
+        }}
+      />
+    </div>
+  );
+}
+
 // One rendered line of the script, memoized.
 // Why: speech recognition fires a result every ~100-300ms and each one updates
 // currentWordIndex. Before, that re-rendered EVERY word span in the script
@@ -307,8 +591,6 @@ Happy recording!`);
   const [isPlaying, setIsPlaying] = useState(false);
   const [followEnabled, setFollowEnabled] = useState(false);
   const [lookaheadWindow, setLookaheadWindow] = useState(18);
-  const [userIsInteracting, setUserIsInteracting] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [centerPaddingVh, setCenterPaddingVh] = useState(45);
   const [showCenterLine, setShowCenterLine] = useState(false);
   const [showAim, setShowAim] = useState(true);
@@ -342,29 +624,6 @@ Happy recording!`);
   const [languageMenuPos, setLanguageMenuPos] = useState({ top: 0, left: 0 });
   const [isIOSChrome, setIsIOSChrome] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-
-  const languagesList = [
-    { code: "en-US", label: "🇺🇸 English (US)" },
-    { code: "en-GB", label: "🇬🇧 English (UK)" },
-    { code: "es-ES", label: "🇪🇸 Español (España)" },
-    { code: "es-MX", label: "🇲🇽 Español (México)" },
-    { code: "fr-FR", label: "🇫🇷 Français" },
-    { code: "de-DE", label: "🇩🇪 Deutsch" },
-    { code: "it-IT", label: "🇮🇹 Italiano" },
-    { code: "pt-BR", label: "🇧🇷 Português (Brasil)" },
-    { code: "pt-PT", label: "🇵🇹 Português (Portugal)" },
-    { code: "ru-RU", label: "🇷🇺 Русский" },
-    { code: "zh-CN", label: "🇨🇳 中文 (简体)" },
-    { code: "ja-JP", label: "🇯🇵 日本語" },
-    { code: "ko-KR", label: "🇰🇷 한국어" },
-    { code: "ar-SA", label: "🇸🇦 العربية" },
-    { code: "hi-IN", label: "🇮🇳 हिन्दी" },
-    { code: "tr-TR", label: "🇹🇷 Türkçe" },
-    { code: "nl-NL", label: "🇳🇱 Nederlands" },
-    { code: "el-GR", label: "🇬🇷 Ελληνικά" },
-    { code: "pl-PL", label: "🇵🇱 Polski" },
-    { code: "sv-SE", label: "🇸🇪 Svenska" },
-  ];
   const [paragraphHighlightOpacity, setParagraphHighlightOpacity] =
     useState(0.12);
   const [linesWords, setLinesWords] = useState([]);
@@ -388,6 +647,7 @@ Happy recording!`);
   const recognitionRef = useRef(null);
   const wordsRef = useRef([]);
   const normalizedWordsRef = useRef([]);
+  const phoneticWordsRef = useRef([]);
   const linesRawRef = useRef([]);
   const linesWordsRef = useRef([]);
   const lineStartIndexRef = useRef([]);
@@ -398,6 +658,8 @@ Happy recording!`);
   const skippableWordsRef = useRef([]);
   const skipCoHostRef = useRef(true);
   const resetTriggerWordRef = useRef("pickle");
+  const lookaheadWindowRef = useRef(18);
+  const keydownRef = useRef(null);
   const lastResetTriggerTsRef = useRef(0);
   const isListeningRef = useRef(false);
   const currentWordIndexRef = useRef(-1);
@@ -406,8 +668,6 @@ Happy recording!`);
   const autoRafIdRef = useRef(null);
   const autoLastTsRef = useRef(0);
   const scrollAnimTokenRef = useRef(0);
-  const userInteractTimeoutRef = useRef(null);
-  const speakingTimeoutRef = useRef(null);
   const hasInitialCenterRef = useRef(false);
   const programmaticScrollRef = useRef(false);
   const prevLineIdxRef = useRef(-1);
@@ -508,10 +768,6 @@ Happy recording!`);
 
       const isFinal = !!chosen.isFinal;
 
-      // mic activity indicator
-      setIsSpeaking(true);
-      if (speakingTimeoutRef.current) clearTimeout(speakingTimeoutRef.current);
-      speakingTimeoutRef.current = setTimeout(() => setIsSpeaking(false), 1000);
       const nowTs = performance.now();
       try {
         window.__lastMicResultTs = nowTs;
@@ -520,9 +776,10 @@ Happy recording!`);
 
       let startIndex = Math.max(currentWordIndexRef.current + 1, 0);
       const isNearStart = currentWordIndexRef.current < 5;
+      const liveLookahead = lookaheadWindowRef.current;
       const effectiveWindow = isNearStart
-        ? Math.max(lookaheadWindow, 30)
-        : lookaheadWindow;
+        ? Math.max(liveLookahead, 30)
+        : liveLookahead;
       const effectiveSoftSkip = isNearStart ? 6 : 3;
 
       const matchWindow = (tokensSlice, fromIdx) => {
@@ -963,6 +1220,7 @@ Happy recording!`);
       if (s.lookaheadWindow != null) setLookaheadWindow(s.lookaheadWindow);
       if (s.centerPaddingVh != null) setCenterPaddingVh(s.centerPaddingVh);
       if (s.showAim != null) setShowAim(s.showAim);
+      if (s.showHighlight != null) setShowHighlight(!!s.showHighlight);
       if (s.aimOffsetX != null) setAimOffsetX(s.aimOffsetX);
       if (s.aimOffsetY != null) setAimOffsetY(s.aimOffsetY);
       if (s.aimStyle) setAimStyle(s.aimStyle);
@@ -981,7 +1239,14 @@ Happy recording!`);
       if (s.textAlignStyle) setTextAlignStyle(s.textAlignStyle);
       if (s.paragraphHighlightOpacity != null)
         setParagraphHighlightOpacity(s.paragraphHighlightOpacity);
-      if (s.language) setLanguage(s.language);
+      if (s.language) {
+        setLanguage(s.language);
+      } else {
+        try {
+          const legacyLang = localStorage.getItem("smartTeleprompterLanguage");
+          if (legacyLang && legacyLang.trim()) setLanguage(legacyLang);
+        } catch (_) {}
+      }
       if (s.mirrorX != null) setMirrorX(!!s.mirrorX);
     } catch (_) {}
   }, []);
@@ -1005,6 +1270,7 @@ Happy recording!`);
         lookaheadWindow,
         centerPaddingVh,
         showAim,
+        showHighlight,
         aimOffsetX,
         aimOffsetY,
         aimStyle,
@@ -1041,6 +1307,7 @@ Happy recording!`);
     lookaheadWindow,
     centerPaddingVh,
     showAim,
+    showHighlight,
     aimOffsetX,
     aimOffsetY,
     aimStyle,
@@ -1060,11 +1327,15 @@ Happy recording!`);
     text,
   ]);
 
-  // Keep the co-host-skip flag in a ref so recognition callbacks (created
-  // once per mic session) always see the current value without re-binding.
+  // Keep the co-host-skip flag and lookahead window in refs so recognition
+  // callbacks always see the current values without re-binding.
   useEffect(() => {
     skipCoHostRef.current = skipCoHostLines;
   }, [skipCoHostLines]);
+
+  useEffect(() => {
+    lookaheadWindowRef.current = lookaheadWindow;
+  }, [lookaheadWindow]);
 
   // Toolbar overflow hints: on narrow screens the toolbar scrolls
   // horizontally, but nothing indicated that more icons exist off-screen.
@@ -1101,260 +1372,52 @@ Happy recording!`);
     } catch (_) {}
   }, [bgColor]);
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files && event.target.files[0];
-    if (!file) return;
-    const ext = (file.name.split(".").pop() || "").toLowerCase();
-    try {
-      if (ext === "txt" || ext === "md" || ext === "markdown") {
-        const txt = await file.text();
-        setText(txt);
-        setShowEditor(true);
-      } else {
-        alert("Supported file types: .txt, .md");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Failed to load file");
-    } finally {
-      event.target.value = "";
-    }
-  };
-
-  const FileButton = ({ onFile }) => {
-    const inputRef = useRef(null);
-    return (
-      <IconButton uiOpacity={uiOpacity}
-        onClick={() => inputRef.current && inputRef.current.click()}
-        ariaLabel="Open File"
-        tooltipTitle="Open File"
-        tooltipDesc="Import .txt/.md"
-      >
-        <Icon name={"arrow-up-tray"} />
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".txt,.md,.markdown,text/plain,text/markdown"
-          onChange={onFile}
-          style={{ display: "none" }}
-        />
-      </IconButton>
-    );
-  };
-
-  const MULTI_WORD_CONTRACTIONS = {
-    gonna: ["going", "to"],
-    wanna: ["want", "to"],
-    gotta: ["got", "to"],
-    outta: ["out", "of"],
-    kinda: ["kind", "of"],
-    sorta: ["sort", "of"],
-    oughta: ["ought", "to"],
-    hafta: ["have", "to"],
-    yall: ["you", "all"],
-    yalls: ["your"],
-    allofem: ["all", "of", "them"],
-    lemme: ["let", "me"],
-    gimme: ["give", "me"],
-    dunno: ["dont", "know"],
-    imma: ["i", "am", "going", "to"],
-    ima: ["i", "am", "going", "to"],
-    fixin: ["fixing"],
-    finna: ["fixing", "to"],
-  };
-
-  const DIALECT_EQUIVALENTS = {
-    fer: ["for", "far"],
-    fur: ["for"],
-    yer: ["your", "youre"],
-    yore: ["your", "youre"],
-    are: ["our", "hour"],
-    our: ["are", "hour"],
-    hour: ["our", "are"],
-    all: ["oil"],
-    oil: ["all"],
-    rat: ["right"],
-    rite: ["right"],
-    raht: ["right"],
-    far: ["fire", "for"],
-    fahr: ["fire"],
-    tar: ["tire", "tired"],
-    tahr: ["tire"],
-    git: ["get"],
-    jist: ["just"],
-    jest: ["just"],
-    kin: ["can"],
-    pin: ["pen"],
-    pen: ["pin"],
-    tin: ["ten"],
-    ten: ["tin"],
-    fill: ["feel"],
-    feel: ["fill"],
-    still: ["steel"],
-    steel: ["still"],
-    hill: ["heel", "heal"],
-    sale: ["sell"],
-    sell: ["sale"],
-    tail: ["tell"],
-    tell: ["tail"],
-    wont: ["want"],
-    want: ["wont"],
-    aint: ["isnt", "arent", "am", "hasnt", "havent"],
-    em: ["them"],
-    bout: ["about"],
-    cause: ["because"],
-    cuz: ["because"],
-    cos: ["because"],
-    til: ["until"],
-    nothin: ["nothing"],
-    somethin: ["something"],
-    everythin: ["everything"],
-    anythin: ["anything"],
-    doin: ["doing"],
-    goin: ["going"],
-    comin: ["coming"],
-    sayin: ["saying"],
-    talkin: ["talking"],
-    walkin: ["walking"],
-    workin: ["working"],
-    lookin: ["looking"],
-    thinkin: ["thinking"],
-    tryin: ["trying"],
-    runnin: ["running"],
-    gettin: ["getting"],
-    makin: ["making"],
-    takin: ["taking"],
-  };
-
-  const expandDialectTokens = (tokens) => {
-    const out = [];
-    for (const tok of tokens) {
-      if (!tok) continue;
-      if (MULTI_WORD_CONTRACTIONS[tok]) {
-        out.push(...MULTI_WORD_CONTRACTIONS[tok]);
-      } else {
-        out.push(tok);
-      }
-    }
-    return out;
-  };
-
-  const getPhoneticSkeleton = (word) => {
-    if (!word || word.length < 3) return word;
-    const w = word
-      .replace(/^kn/, "n")
-      .replace(/^wr/, "r")
-      .replace(/^wh/, "w")
-      .replace(/ph/g, "f")
-      .replace(/ck/g, "k")
-      .replace(/dg/g, "j")
-      .replace(/ght/g, "t")
-      .replace(/gh/g, "")
-      .replace(/in$/, "ing");
-    const first = w[0];
-    const rest = w
-      .slice(1)
-      .replace(/[aeiouy]/g, "")
-      .replace(/(.)\1+/g, "$1");
-    return first + rest;
-  };
-
-  const withinEditDistance = (a, b, maxDist) => {
-    const la = a.length;
-    const lb = b.length;
-    if (Math.abs(la - lb) > maxDist) return false;
-    const prev = new Array(lb + 1);
-    const curr = new Array(lb + 1);
-    for (let j = 0; j <= lb; j++) prev[j] = j;
-    for (let i = 1; i <= la; i++) {
-      curr[0] = i;
-      let rowMin = curr[0];
-      for (let j = 1; j <= lb; j++) {
-        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-        curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
-        if (curr[j] < rowMin) rowMin = curr[j];
-      }
-      if (rowMin > maxDist) return false;
-      for (let j = 0; j <= lb; j++) prev[j] = curr[j];
-    }
-    return prev[lb] <= maxDist;
-  };
-
-  const tokensEqual = (a, b) => {
-    if (!a || !b) return false;
-    if (a === b) return true;
-    if (a.length >= 4 && b.length >= 4 && (a === b + "g" || b === a + "g"))
-      return true;
-    const eqA = DIALECT_EQUIVALENTS[a];
-    if (eqA && eqA.includes(b)) return true;
-    const eqB = DIALECT_EQUIVALENTS[b];
-    if (eqB && eqB.includes(a)) return true;
-    return false;
-  };
-
-  const tokensSoftMatch = (target, token) => {
-    if (!target || !token) return false;
-    if (tokensEqual(target, token)) return true;
-    if (
-      token.length >= 3 &&
-      (target.startsWith(token) || token.startsWith(target))
-    )
-      return true;
-    if (token.length >= 4 && (target.includes(token) || token.includes(target)))
-      return true;
-    if (target.length >= 4 && token.length >= 4) {
-      const maxDist = target.length >= 6 && token.length >= 6 ? 2 : 1;
-      if (withinEditDistance(target, token, maxDist)) return true;
-    }
-    if (target.length >= 3 && token.length >= 3 && target[0] === token[0]) {
-      const skelA = getPhoneticSkeleton(target);
-      const skelB = getPhoneticSkeleton(token);
-      if (skelA.length >= 2 && skelA === skelB) return true;
-    }
-    return false;
-  };
-
-  const normalizeWord = (input) => {
-    if (!input) return "";
-    return input
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/ς/g, "σ")
-      .replace(/[^a-zA-Zα-ω0-9]+/g, "")
-      .trim();
-  };
-
+  const hasParsedInitialTextRef = useRef(false);
   useEffect(() => {
-    const lines = text.split(/\r?\n/);
-    linesRawRef.current = lines;
-    const linesWords = lines.map((ln) =>
-      ln.split(/\s+/).filter((w) => w.trim().length > 0)
-    );
-    linesWordsRef.current = linesWords;
+    const parseScript = () => {
+      const lines = text.split(/\r?\n/);
+      linesRawRef.current = lines;
+      const parsedLinesWords = lines.map((ln) =>
+        ln.split(/\s+/).filter((w) => w.trim().length > 0)
+      );
+      linesWordsRef.current = parsedLinesWords;
 
-    // Which lines belong to a co-host (">>" / "@Name:" prefix)
-    const lineIsCoHostArr = lines.map((ln) => CO_HOST_LINE_RE.test(ln));
-    lineIsCoHostRef.current = lineIsCoHostArr;
+      // Which lines belong to a co-host (">>" / "@Name:" prefix)
+      const lineIsCoHostArr = lines.map((ln) => CO_HOST_LINE_RE.test(ln));
+      lineIsCoHostRef.current = lineIsCoHostArr;
 
-    const flatWords = [];
-    const starts = [];
-    const skippable = [];
-    for (let i = 0; i < linesWords.length; i++) {
-      starts.push(flatWords.length);
-      for (const w of linesWords[i]) {
-        flatWords.push(w);
-        skippable.push(lineIsCoHostArr[i]);
+      const flatWords = [];
+      const starts = [];
+      const skippable = [];
+      for (let i = 0; i < parsedLinesWords.length; i++) {
+        starts.push(flatWords.length);
+        for (const w of parsedLinesWords[i]) {
+          flatWords.push(w);
+          skippable.push(lineIsCoHostArr[i]);
+        }
       }
+      const normWords = flatWords.map(normalizeWord);
+      lineStartIndexRef.current = starts;
+      wordsRef.current = flatWords;
+      normalizedWordsRef.current = normWords;
+      phoneticWordsRef.current = normWords.map(getPhoneticSkeleton);
+      skippableWordsRef.current = skippable;
+      setLinesWords(parsedLinesWords);
+      setLineStartIndex(starts);
+      setLineIsCoHost(lineIsCoHostArr);
+    };
+
+    // Parse synchronously on initial mount or when editor is closed (e.g. loading a script),
+    // and debounce while typing in the Script Editor to avoid re-tokenizing on every keystroke.
+    if (!hasParsedInitialTextRef.current || !showEditor) {
+      hasParsedInitialTextRef.current = true;
+      parseScript();
+      return;
     }
-    lineStartIndexRef.current = starts;
-    wordsRef.current = flatWords;
-    normalizedWordsRef.current = flatWords.map(normalizeWord);
-    skippableWordsRef.current = skippable;
-    setLinesWords(linesWords);
-    setLineStartIndex(starts);
-    setLineIsCoHost(lineIsCoHostArr);
-  }, [text]);
+
+    const timer = setTimeout(parseScript, 150);
+    return () => clearTimeout(timer);
+  }, [text, showEditor]);
 
   useEffect(() => {
     if (!hasInitialCenterRef.current && linesWords && linesWords.length > 0) {
@@ -1633,15 +1696,17 @@ Happy recording!`);
 
   // Watchdog: if active and the anchor drifts far from the current word, force re-center
   useEffect(() => {
-    let rafId = null;
+    const active = isListening || isPlaying;
+    if (!active) return;
+
     let lastResultTs = performance.now();
     lastMicResultTsRef.current = lastResultTs;
     try {
       window.__lastMicResultTs = lastResultTs;
     } catch (_) {}
-    const tick = () => {
-      const active = isListening || isPlaying;
-      if (active && !programmaticScrollRef.current) {
+
+    const intervalId = setInterval(() => {
+      if (!programmaticScrollRef.current) {
         const idx = currentWordIndexRef.current;
         if (idx >= 0) {
           const approxLinePx = Math.max(1, fontSize * lineHeight * 1.0);
@@ -1681,30 +1746,16 @@ Happy recording!`);
           safeRestartRecognition(200);
         }
       }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
+    }, 250);
+
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
+      clearInterval(intervalId);
     };
   }, [isListening, isPlaying, fontSize, lineHeight, centerPaddingVh]);
 
   useEffect(() => {
     const el = textContainerRef.current;
     if (!el) return;
-    let isTouching = false;
-    let isWheelScrolling = false;
-    const markInteract = () => {
-      if (isListening || isPlaying) return;
-
-      setUserIsInteracting(true);
-      if (userInteractTimeoutRef.current)
-        clearTimeout(userInteractTimeoutRef.current);
-      userInteractTimeoutRef.current = setTimeout(
-        () => setUserIsInteracting(false),
-        1200
-      );
-    };
     const onScroll = () => {
       if (programmaticScrollRef.current) return;
       if (el.scrollTop <= 30 && currentWordIndexRef.current > 0) {
@@ -1713,44 +1764,17 @@ Happy recording!`);
         prevLineIdxRef.current = -1;
         prevVisualLineIdxRef.current = -1;
       }
-      // If active modes are on, ignore manual scroll so it never stalls
-      if (isListening || isPlaying) return;
-      markInteract();
-    };
-    const onWheel = () => {
-      isWheelScrolling = true;
-      markInteract();
-    };
-    const onTouchStart = () => {
-      isTouching = true;
-      markInteract();
-    };
-    const onTouchMove = () => {
-      if (isTouching) markInteract();
-    };
-    const onTouchEnd = () => {
-      isTouching = false;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    el.addEventListener("wheel", onWheel, { passive: true });
-    el.addEventListener("touchstart", onTouchStart, { passive: true });
-    el.addEventListener("touchmove", onTouchMove, { passive: true });
-    el.addEventListener("touchend", onTouchEnd, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
-      el.removeEventListener("wheel", onWheel);
-      el.removeEventListener("touchstart", onTouchStart);
-      el.removeEventListener("touchmove", onTouchMove);
-      el.removeEventListener("touchend", onTouchEnd);
-      if (userInteractTimeoutRef.current)
-        clearTimeout(userInteractTimeoutRef.current);
     };
-  }, [isPlaying, isListening]);
+  }, []);
 
   const tryAdvanceByTokens = (
     tokens,
     startIndex,
-    { maxWindow = lookaheadWindow, maxSoftSkip = 1 } = {}
+    { maxWindow = lookaheadWindowRef.current, maxSoftSkip = 1 } = {}
   ) => {
     const candidates = tokens.filter(Boolean).slice(-3);
     if (candidates.length === 0) return { index: -1, nUsed: 0 };
@@ -1800,6 +1824,7 @@ Happy recording!`);
         let exactCount = 0;
         for (let k = 0; k < n; k++) {
           const target = normalizedWordsRef.current[i + k];
+          const targetSkel = phoneticWordsRef.current[i + k];
           const token = seq[k];
           if (!target || (skip && skip[i + k])) {
             ok = false;
@@ -1807,7 +1832,7 @@ Happy recording!`);
           }
           if (tokensEqual(target, token)) {
             exactCount++;
-          } else if (!tokensSoftMatch(target, token)) {
+          } else if (!tokensSoftMatch(target, token, targetSkel)) {
             ok = false;
             break;
           }
@@ -1827,7 +1852,8 @@ Happy recording!`);
     // soft matches (prefix/contains) within soft limit
     for (const i of softIdx) {
       const target = normalizedWordsRef.current[i];
-      if (tokensSoftMatch(target, t1)) return { index: i, nUsed: 1 };
+      const targetSkel = phoneticWordsRef.current[i];
+      if (tokensSoftMatch(target, t1, targetSkel)) return { index: i, nUsed: 1 };
     }
 
     return { index: -1, nUsed: 0 };
@@ -1836,10 +1862,17 @@ Happy recording!`);
   const getLineIdxForWord = (wIdx) => {
     const targetIdx = Math.max(0, wIdx);
     const starts = lineStartIndexRef.current;
+    let lo = 0;
+    let hi = starts.length - 1;
     let lineIdx = 0;
-    for (let i = 0; i < starts.length; i++) {
-      if (starts[i] <= targetIdx) lineIdx = i;
-      else break;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (starts[mid] <= targetIdx) {
+        lineIdx = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
     return lineIdx;
   };
@@ -1879,9 +1912,11 @@ Happy recording!`);
         for (let i = localStart; i <= le - 1; i++) {
           const a = normalizedWordsRef.current[i];
           const b = normalizedWordsRef.current[i + 1];
+          const skelA = phoneticWordsRef.current[i];
+          const skelB = phoneticWordsRef.current[i + 1];
           if (
-            tokensSoftMatch(a, seq2[0]) &&
-            tokensSoftMatch(b, seq2[1]) &&
+            tokensSoftMatch(a, seq2[0], skelA) &&
+            tokensSoftMatch(b, seq2[1], skelB) &&
             (tokensEqual(a, seq2[0]) || tokensEqual(b, seq2[1]))
           ) {
             return i + 1;
@@ -1899,7 +1934,8 @@ Happy recording!`);
       if (allowSoft) {
         for (let i = localStart; i <= softLimit; i++) {
           const w = normalizedWordsRef.current[i];
-          if (w && tokensSoftMatch(w, t)) return i;
+          const skelW = phoneticWordsRef.current[i];
+          if (w && tokensSoftMatch(w, t, skelW)) return i;
         }
       }
     }
@@ -1981,12 +2017,6 @@ Happy recording!`);
         setIsListening(true);
         setIsPlaying(false);
 
-        // Reset user interaction flag
-        setUserIsInteracting(false);
-        if (userInteractTimeoutRef.current) {
-          clearTimeout(userInteractTimeoutRef.current);
-        }
-
         setTimeout(() => {
           prevLineIdxRef.current = -1; // force first-centering
           prevVisualLineIdxRef.current = -1;
@@ -2005,12 +2035,6 @@ Happy recording!`);
     const nextPlaying = !isPlaying;
     setIsPlaying(nextPlaying);
     if (nextPlaying && wordsRef.current.length > 0) {
-      // Reset user interaction flag
-      setUserIsInteracting(false);
-      if (userInteractTimeoutRef.current) {
-        clearTimeout(userInteractTimeoutRef.current);
-      }
-
       if (currentWordIndex < 0) {
         setCurrentWordIndex(0);
         setTimeout(() => {
@@ -2038,7 +2062,6 @@ Happy recording!`);
       clearInterval(autoScrollInterval.current);
       autoScrollInterval.current = null;
     }
-    if (!nextPlaying) setIsSpeaking(false);
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
@@ -2076,21 +2099,6 @@ Happy recording!`);
     setIsIOSChrome(isIOS && isChrome);
   }, []);
 
-  // Load language from localStorage after component mounts
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage) {
-      try {
-        const savedLanguage = localStorage.getItem("smartTeleprompterLanguage");
-        if (savedLanguage && savedLanguage.trim()) {
-          console.log("Language loaded from localStorage:", savedLanguage);
-          setLanguage(savedLanguage);
-        }
-      } catch (error) {
-        console.error("Failed to load language from localStorage:", error);
-      }
-    }
-  }, []); // Run only once after mount
-
   // Track fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -2101,18 +2109,6 @@ Happy recording!`);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
-
-  // Save language to localStorage when it changes
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage && language) {
-      try {
-        localStorage.setItem("smartTeleprompterLanguage", language);
-        console.log("Language saved to localStorage:", language);
-      } catch (error) {
-        console.error("Failed to save language to localStorage:", error);
-      }
-    }
-  }, [language]);
 
   // Close menus when clicking outside
   useEffect(() => {
@@ -2143,87 +2139,90 @@ Happy recording!`);
     };
   }, [showLanguageSelector, showSettings, showEditor]);
 
+  keydownRef.current = (e) => {
+    const tag =
+      e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
+    if (tag === "input" || tag === "textarea" || tag === "select" || e.isComposing) return;
+    if (e.key === "v" || e.key === "V") {
+      e.preventDefault();
+      toggleListening();
+      return;
+    }
+    if (e.key === "p" || e.key === "P") {
+      e.preventDefault();
+      toggleAutoPlay();
+      return;
+    }
+    if (e.key === "h" || e.key === "H") {
+      e.preventDefault();
+      setShowHighlight((v) => !v);
+      return;
+    }
+    if (e.key === "r" || e.key === "R") {
+      e.preventDefault();
+      resetPosition();
+      return;
+    }
+    if (e.key === "l" || e.key === "L") {
+      e.preventDefault();
+      setShowLanguageSelector((v) => !v);
+      // recompute anchor position
+      if (languageBtnRef.current) {
+        const rect = languageBtnRef.current.getBoundingClientRect();
+        setLanguageMenuPos({ top: rect.bottom + 8, left: rect.left });
+      }
+      return;
+    }
+    if (e.key === "s" || e.key === "S") {
+      e.preventDefault();
+      setShowEditor((v) => !v);
+      return;
+    }
+    if (e.key === "b" || e.key === "B") {
+      e.preventDefault();
+      setShowEditor(true);
+      setShowScriptList((v) => !v);
+      return;
+    }
+    if (e.key === "e" || e.key === "E") {
+      e.preventDefault();
+      setShowSettings((v) => !v);
+      return;
+    }
+    if (e.key === "f" || e.key === "F") {
+      e.preventDefault();
+      toggleFullscreen();
+      return;
+    }
+    if (e.key === "m" || e.key === "M") {
+      e.preventDefault();
+      setMirrorX((v) => !v);
+      return;
+    }
+    if (e.key === "?") {
+      e.preventDefault();
+      setShowShortcuts((v) => !v);
+      return;
+    }
+    if (e.key === "Escape") {
+      if (deleteScriptConfirm) { setDeleteScriptConfirm(null); }
+      else if (showAddScript) { setShowAddScript(false); }
+      else if (showShortcuts) { setShowShortcuts(false); }
+      else if (showResetConfirm) { setShowResetConfirm(false); }
+      else if (showLanguageSelector) { setShowLanguageSelector(false); }
+      else if (showEditor) { setShowEditor(false); }
+      else if (showSettings) { setShowSettings(false); }
+      else return;
+      e.preventDefault();
+      return;
+    }
+  };
+
   useEffect(() => {
-    const onKeyDown = (e) => {
-      const tag =
-        e.target && e.target.tagName ? e.target.tagName.toLowerCase() : "";
-      if (tag === "input" || tag === "textarea" || e.isComposing) return;
-      if (e.key === "v" || e.key === "V") {
-        e.preventDefault();
-        toggleListening();
-        return;
-      }
-      if (e.key === "p" || e.key === "P") {
-        e.preventDefault();
-        toggleAutoPlay();
-        return;
-      }
-      if (e.key === "h" || e.key === "H") {
-        e.preventDefault();
-        setShowHighlight((v) => !v);
-        return;
-      }
-      if (e.key === "r" || e.key === "R") {
-        e.preventDefault();
-        resetPosition();
-        return;
-      }
-      if (e.key === "l" || e.key === "L") {
-        e.preventDefault();
-        setShowLanguageSelector((v) => !v);
-        // recompute anchor position
-        if (languageBtnRef.current) {
-          const rect = languageBtnRef.current.getBoundingClientRect();
-          setLanguageMenuPos({ top: rect.bottom + 8, left: rect.left });
-        }
-        return;
-      }
-      if (e.key === "s" || e.key === "S") {
-        e.preventDefault();
-        setShowEditor((v) => !v);
-        return;
-      }
-      if (e.key === "b" || e.key === "B") {
-        e.preventDefault();
-        setShowEditor(true);
-        setShowScriptList((v) => !v);
-        return;
-      }
-      if (e.key === "e" || e.key === "E") {
-        e.preventDefault();
-        setShowSettings((v) => !v);
-        return;
-      }
-      if (e.key === "f" || e.key === "F") {
-        e.preventDefault();
-        toggleFullscreen();
-        return;
-      }
-      if (e.key === "m" || e.key === "M") {
-        e.preventDefault();
-        setMirrorX((v) => !v);
-        return;
-      }
-      if (e.key === "?") {
-        e.preventDefault();
-        setShowShortcuts((v) => !v);
-        return;
-      }
-      if (e.key === "Escape") {
-        if (deleteScriptConfirm) { setDeleteScriptConfirm(null); }
-        else if (showAddScript) { setShowAddScript(false); }
-        else if (showShortcuts) { setShowShortcuts(false); }
-        else if (showResetConfirm) { setShowResetConfirm(false); }
-        else if (showEditor) { setShowEditor(false); }
-        else if (showSettings) { setShowSettings(false); }
-        else return;
-        e.preventDefault();
-        return;
-      }
-    };
+    const onKeyDown = (e) => keydownRef.current && keydownRef.current(e);
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [isListening, isPlaying, showHighlight, showShortcuts]);
+  }, []);
 
   // Recompute language menu position when opened
   useEffect(() => {
@@ -2246,12 +2245,8 @@ Happy recording!`);
     autoLastTsRef.current = 0;
     setIsPlaying(false);
 
-    // Cancel any ongoing smooth scroll animation and clear interaction pause
+    // Cancel any ongoing smooth scroll animation
     scrollAnimTokenRef.current++;
-    setUserIsInteracting(false);
-    if (userInteractTimeoutRef.current) {
-      clearTimeout(userInteractTimeoutRef.current);
-    }
 
     // Reset indices and trackers while keeping microphone listening active
     prevLineIdxRef.current = -1;
@@ -2731,7 +2726,7 @@ Happy recording!`);
                 boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
               }}
             >
-              {languagesList.map((lng) => (
+              {LANGUAGES_LIST.map((lng) => (
                 <button
                   key={lng.code}
                   onClick={() => {
@@ -2859,9 +2854,19 @@ Happy recording!`);
             ariaLabel="Script Editor"
             tooltipTitle="Script Editor (S)"
             tooltipDesc="Toggle script editor"
-            style={{ background: "#0f0f0f" }}
+            style={{
+              background: showEditor ? "#1565c0" : "#1f2937",
+              border: "1px solid rgba(255,255,255,0.25)",
+              width: "auto",
+              height: 48,
+              padding: "0 16px",
+              gap: "8px",
+              fontWeight: "bold",
+              fontSize: "15px",
+            }}
           >
             <Icon name={"pencil-square"} />
+            <span>Edit Script</span>
           </IconButton>
 
           <IconButton uiOpacity={uiOpacity}
@@ -2940,12 +2945,14 @@ Happy recording!`);
             padding: "25px",
             borderRadius: "12px",
             zIndex: 10000,
-            minWidth: "320px",
-            maxWidth: showEditor ? "500px" : "calc(95vw - 40px)",
-            maxHeight: "80vh",
+            minWidth: showEditor ? "min(860px, calc(100vw - 32px))" : "320px",
+            width: showEditor ? "min(860px, calc(100vw - 32px))" : "auto",
+            maxWidth: showEditor ? "calc(100vw - 32px)" : "calc(95vw - 40px)",
+            maxHeight: "86vh",
             overflowY: "auto",
             boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
             border: "2px solid rgba(255,255,255,0.1)",
+            boxSizing: "border-box",
           }}
         >
           <div
@@ -2984,15 +2991,18 @@ Happy recording!`);
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 style={{
-                  width: "94%",
-                  minHeight: showScriptList ? "25vh" : "50vh",
-                  padding: "10px",
-                  borderRadius: "6px",
+                  width: "100%",
+                  boxSizing: "border-box",
+                  minHeight: showScriptList ? "40vh" : "64vh",
+                  padding: "14px",
+                  borderRadius: "8px",
                   border: "1px solid #555",
                   background: "#222",
                   color: "white",
-                  fontSize: "14px",
+                  fontSize: "16px",
+                  lineHeight: 1.5,
                   fontFamily: "inherit",
+                  resize: "vertical",
                   transition: "min-height 0.2s ease",
                 }}
               />
@@ -3125,7 +3135,7 @@ Happy recording!`);
                                 {script.name}
                               </div>
                               <div style={{ color: "#666", fontSize: "10px", marginTop: "1px" }}>
-                                {(languagesList.find((l) => l.code === script.language) || {}).label || script.language || "—"}
+                                {(LANGUAGES_LIST.find((l) => l.code === script.language) || {}).label || script.language || "—"}
                                 {" · "}
                                 {script.text.split(/\s+/).filter(Boolean).length} words
                               </div>
@@ -3266,59 +3276,13 @@ Happy recording!`);
                     }}
                   />
                 </div>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue = Math.round(16 + percentage * (200 - 16));
-                    setFontSize(Math.max(16, Math.min(200, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((fontSize - 16) / (200 - 16)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = fontSize;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 200;
-                      const minValue = 16;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue = Math.round(startValue + deltaValue);
-                        setFontSize(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={fontSize}
+                  min={16}
+                  max={200}
+                  step={1}
+                  onChange={setFontSize}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -3331,59 +3295,13 @@ Happy recording!`);
                 >
                   Side padding: {sidePaddingVw}vw
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue = Math.round(0 + percentage * (40 - 0));
-                    setSidePaddingVw(Math.max(0, Math.min(40, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((sidePaddingVw - 0) / (40 - 0)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = sidePaddingVw;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 40;
-                      const minValue = 0;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue = Math.round(startValue + deltaValue);
-                        setSidePaddingVw(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={sidePaddingVw}
+                  min={0}
+                  max={40}
+                  step={1}
+                  onChange={setSidePaddingVw}
+                />
               </div>
 
               {/* Text align controls removed per request */}
@@ -3523,61 +3441,13 @@ Happy recording!`);
                 >
                   Line height: {lineHeight.toFixed(1)}
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue =
-                      Math.round((1 + percentage * (3 - 1)) * 10) / 10;
-                    setLineHeight(Math.max(1, Math.min(3, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((lineHeight - 1) / (3 - 1)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = lineHeight;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 3;
-                      const minValue = 1;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue =
-                          Math.round((startValue + deltaValue) * 10) / 10;
-                        setLineHeight(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={lineHeight}
+                  min={1}
+                  max={3}
+                  step={0.1}
+                  onChange={setLineHeight}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -3590,59 +3460,13 @@ Happy recording!`);
                 >
                   Paragraph spacing: {paragraphSpacingPx}px
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue = Math.round(0 + percentage * (40 - 0));
-                    setParagraphSpacingPx(Math.max(0, Math.min(40, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((paragraphSpacingPx - 0) / (40 - 0)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = paragraphSpacingPx;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 40;
-                      const minValue = 0;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue = Math.round(startValue + deltaValue);
-                        setParagraphSpacingPx(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={paragraphSpacingPx}
+                  min={0}
+                  max={40}
+                  step={1}
+                  onChange={setParagraphSpacingPx}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -3655,59 +3479,13 @@ Happy recording!`);
                 >
                   Auto-scroll speed: {scrollSpeed}
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue = Math.round(10 + percentage * (200 - 10));
-                    setScrollSpeed(Math.max(10, Math.min(200, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((scrollSpeed - 10) / (200 - 10)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = scrollSpeed;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 200;
-                      const minValue = 10;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue = Math.round(startValue + deltaValue);
-                        setScrollSpeed(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={scrollSpeed}
+                  min={10}
+                  max={200}
+                  step={1}
+                  onChange={setScrollSpeed}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -3720,62 +3498,13 @@ Happy recording!`);
                 >
                   Lookahead window: {lookaheadWindow} words
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue = Math.round(1 + percentage * (40 - 1));
-                    setLookaheadWindow(Math.max(1, Math.min(40, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((lookaheadWindow - 1) / (40 - 1)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = lookaheadWindow;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      // Max raised 20 -> 40 (GitHub #2): lets tracking skip
-                      // over a co-host's lines. Safe because far jumps still
-                      // require a 2-3 word exact match (see tryAdvanceByTokens)
-                      const maxValue = 40;
-                      const minValue = 1;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue = Math.round(startValue + deltaValue);
-                        setLookaheadWindow(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={lookaheadWindow}
+                  min={1}
+                  max={40}
+                  step={1}
+                  onChange={setLookaheadWindow}
+                />
                 <div
                   style={{ color: "#aaa", fontSize: "12px", marginTop: "4px" }}
                 >
@@ -3864,61 +3593,13 @@ Happy recording!`);
                 >
                   Text opacity: {Math.round(textOpacity * 100)}%
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue =
-                      Math.round((0.2 + percentage * (1 - 0.2)) * 20) / 20;
-                    setTextOpacity(Math.max(0.2, Math.min(1, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((textOpacity - 0.2) / (1 - 0.2)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = textOpacity;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 1;
-                      const minValue = 0.2;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue =
-                          Math.round((startValue + deltaValue) * 20) / 20;
-                        setTextOpacity(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={textOpacity}
+                  min={0.2}
+                  max={1}
+                  step={0.05}
+                  onChange={setTextOpacity}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -3931,61 +3612,13 @@ Happy recording!`);
                 >
                   Aim opacity: {Math.round(aimOpacity * 100)}%
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue =
-                      Math.round((0 + percentage * (1 - 0)) * 20) / 20;
-                    setAimOpacity(Math.max(0, Math.min(1, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((aimOpacity - 0) / (1 - 0)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = aimOpacity;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 1;
-                      const minValue = 0;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue =
-                          Math.round((startValue + deltaValue) * 20) / 20;
-                        setAimOpacity(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={aimOpacity}
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  onChange={setAimOpacity}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -3999,63 +3632,13 @@ Happy recording!`);
                   Paragraph highlight opacity:{" "}
                   {Math.round(paragraphHighlightOpacity * 100)}%
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue =
-                      Math.round((0 + percentage * (0.6 - 0)) * 50) / 50;
-                    setParagraphHighlightOpacity(
-                      Math.max(0, Math.min(0.6, newValue))
-                    );
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `${
-                        ((paragraphHighlightOpacity - 0) / (0.6 - 0)) * 100
-                      }%`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = paragraphHighlightOpacity;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 0.6;
-                      const minValue = 0;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue =
-                          Math.round((startValue + deltaValue) * 50) / 50;
-                        setParagraphHighlightOpacity(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={paragraphHighlightOpacity}
+                  min={0}
+                  max={0.6}
+                  step={0.02}
+                  onChange={setParagraphHighlightOpacity}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -4068,61 +3651,13 @@ Happy recording!`);
                 >
                   Operation buttons opacity: {Math.round(uiOpacity * 100)}%
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue =
-                      Math.round((0.2 + percentage * (1 - 0.2)) * 20) / 20;
-                    setUiOpacity(Math.max(0.2, Math.min(1, newValue)));
-                  }}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((uiOpacity - 0.2) / (1 - 0.2)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const startX = e.clientX;
-                      const startValue = uiOpacity;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 1;
-                      const minValue = 0.2;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue =
-                          Math.round((startValue + deltaValue) * 20) / 20;
-                        setUiOpacity(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={uiOpacity}
+                  min={0.2}
+                  max={1}
+                  step={0.05}
+                  onChange={setUiOpacity}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -4244,69 +3779,13 @@ Happy recording!`);
                     >
                       Horizontal offset: {aimOffsetX}px
                     </label>
-                    <div
-                      className="custom-slider"
-                      onClick={(e) => {
-                        if (e.target.classList.contains("custom-slider-thumb"))
-                          return;
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const x = e.clientX - rect.left;
-                        const percentage = x / rect.width;
-                        const newValue = Math.round(
-                          -400 + percentage * (400 - -400)
-                        );
-                        setAimOffsetX(Math.max(-400, Math.min(400, newValue)));
-                      }}
-                    >
-                      <div className="custom-slider-track" />
-                      <div
-                        className="custom-slider-thumb"
-                        style={{
-                          left: `calc(${
-                            ((aimOffsetX - -400) / (400 - -400)) * 100
-                          }% - 8px)`,
-                        }}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          const startX = e.clientX;
-                          const startValue = aimOffsetX;
-                          const rect =
-                            e.currentTarget.parentElement.getBoundingClientRect();
-                          const maxValue = 400;
-                          const minValue = -400;
-
-                          const handleMouseMove = (moveEvent) => {
-                            const deltaX = moveEvent.clientX - startX;
-                            const deltaPercentage = deltaX / rect.width;
-                            const deltaValue =
-                              deltaPercentage * (maxValue - minValue);
-                            const newValue = Math.round(
-                              startValue + deltaValue
-                            );
-                            setAimOffsetX(
-                              Math.max(minValue, Math.min(maxValue, newValue))
-                            );
-                          };
-
-                          const handleMouseUp = () => {
-                            document.removeEventListener(
-                              "mousemove",
-                              handleMouseMove
-                            );
-                            document.removeEventListener(
-                              "mouseup",
-                              handleMouseUp
-                            );
-                          };
-
-                          document.addEventListener(
-                            "mousemove",
-                            handleMouseMove
-                          );
-                          document.addEventListener("mouseup", handleMouseUp);
-                        }}
-                      />
-                    </div>
+                    <CustomSlider
+                      value={aimOffsetX}
+                      min={-400}
+                      max={400}
+                      step={1}
+                      onChange={setAimOffsetX}
+                    />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label
@@ -4318,69 +3797,13 @@ Happy recording!`);
                     >
                       Vertical offset: {aimOffsetY}px
                     </label>
-                    <div
-                      className="custom-slider"
-                      onClick={(e) => {
-                        if (e.target.classList.contains("custom-slider-thumb"))
-                          return;
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const x = e.clientX - rect.left;
-                        const percentage = x / rect.width;
-                        const newValue = Math.round(
-                          -300 + percentage * (300 - -300)
-                        );
-                        setAimOffsetY(Math.max(-300, Math.min(300, newValue)));
-                      }}
-                    >
-                      <div className="custom-slider-track" />
-                      <div
-                        className="custom-slider-thumb"
-                        style={{
-                          left: `calc(${
-                            ((aimOffsetY - -300) / (300 - -300)) * 100
-                          }% - 8px)`,
-                        }}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          const startX = e.clientX;
-                          const startValue = aimOffsetY;
-                          const rect =
-                            e.currentTarget.parentElement.getBoundingClientRect();
-                          const maxValue = 300;
-                          const minValue = -300;
-
-                          const handleMouseMove = (moveEvent) => {
-                            const deltaX = moveEvent.clientX - startX;
-                            const deltaPercentage = deltaX / rect.width;
-                            const deltaValue =
-                              deltaPercentage * (maxValue - minValue);
-                            const newValue = Math.round(
-                              startValue + deltaValue
-                            );
-                            setAimOffsetY(
-                              Math.max(minValue, Math.min(maxValue, newValue))
-                            );
-                          };
-
-                          const handleMouseUp = () => {
-                            document.removeEventListener(
-                              "mousemove",
-                              handleMouseMove
-                            );
-                            document.removeEventListener(
-                              "mouseup",
-                              handleMouseUp
-                            );
-                          };
-
-                          document.addEventListener(
-                            "mousemove",
-                            handleMouseMove
-                          );
-                          document.addEventListener("mouseup", handleMouseUp);
-                        }}
-                      />
-                    </div>
+                    <CustomSlider
+                      value={aimOffsetY}
+                      min={-300}
+                      max={300}
+                      step={1}
+                      onChange={setAimOffsetY}
+                    />
                   </div>
                 </div>
                 <button
@@ -4447,63 +3870,15 @@ Happy recording!`);
                 >
                   Text centering offset (top/bottom): {centerPaddingVh}vh
                 </label>
-                <div
-                  className="custom-slider"
-                  onClick={(e) => {
-                    if (e.target.classList.contains("custom-slider-thumb"))
-                      return;
-                    const rect = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - rect.left;
-                    const percentage = x / rect.width;
-                    const newValue = Math.round(20 + percentage * (60 - 20));
-                    setCenterPaddingVh(Math.max(20, Math.min(60, newValue)));
-                  }}
-                  onMouseDown={() => setShowCenterLine(true)}
-                  onMouseUp={() => setShowCenterLine(false)}
-                >
-                  <div className="custom-slider-track" />
-                  <div
-                    className="custom-slider-thumb"
-                    style={{
-                      left: `calc(${
-                        ((centerPaddingVh - 20) / (60 - 20)) * 100
-                      }% - 8px)`,
-                    }}
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      setShowCenterLine(true);
-                      const startX = e.clientX;
-                      const startValue = centerPaddingVh;
-                      const rect =
-                        e.currentTarget.parentElement.getBoundingClientRect();
-                      const maxValue = 60;
-                      const minValue = 20;
-
-                      const handleMouseMove = (moveEvent) => {
-                        const deltaX = moveEvent.clientX - startX;
-                        const deltaPercentage = deltaX / rect.width;
-                        const deltaValue =
-                          deltaPercentage * (maxValue - minValue);
-                        const newValue = Math.round(startValue + deltaValue);
-                        setCenterPaddingVh(
-                          Math.max(minValue, Math.min(maxValue, newValue))
-                        );
-                      };
-
-                      const handleMouseUp = () => {
-                        setShowCenterLine(false);
-                        document.removeEventListener(
-                          "mousemove",
-                          handleMouseMove
-                        );
-                        document.removeEventListener("mouseup", handleMouseUp);
-                      };
-
-                      document.addEventListener("mousemove", handleMouseMove);
-                      document.addEventListener("mouseup", handleMouseUp);
-                    }}
-                  />
-                </div>
+                <CustomSlider
+                  value={centerPaddingVh}
+                  min={20}
+                  max={60}
+                  step={1}
+                  onChange={setCenterPaddingVh}
+                  onDragStart={() => setShowCenterLine(true)}
+                  onDragEnd={() => setShowCenterLine(false)}
+                />
               </div>
 
               <div style={{ marginBottom: "20px" }}>
@@ -4939,7 +4314,7 @@ Happy recording!`);
                 cursor: "pointer",
               }}
             >
-              {languagesList.map((lng) => (
+              {LANGUAGES_LIST.map((lng) => (
                 <option key={lng.code} value={lng.code}>
                   {lng.label}
                 </option>
