@@ -222,21 +222,26 @@ const tokensEqual = (a, b) => {
 const tokensSoftMatch = (target, token, targetSkel) => {
   if (!target || !token) return false;
   if (tokensEqual(target, token)) return true;
+  if (target.length < 4 || token.length < 4) return false;
   if (
-    token.length >= 3 &&
+    target[0] === token[0] &&
+    Math.abs(target.length - token.length) <= 3 &&
     (target.startsWith(token) || token.startsWith(target))
   )
     return true;
-  if (token.length >= 4 && (target.includes(token) || token.includes(target)))
-    return true;
-  if (target.length >= 4 && token.length >= 4) {
-    const maxDist = target.length >= 6 && token.length >= 6 ? 2 : 1;
+  if (target[0] === token[0]) {
+    const maxDist = target.length >= 7 && token.length >= 7 ? 2 : 1;
     if (withinEditDistance(target, token, maxDist)) return true;
   }
-  if (target.length >= 3 && token.length >= 3 && target[0] === token[0]) {
+  if (
+    target.length >= 5 &&
+    token.length >= 5 &&
+    target[0] === token[0] &&
+    Math.abs(target.length - token.length) <= 2
+  ) {
     const skelA = targetSkel ?? getPhoneticSkeleton(target);
     const skelB = getPhoneticSkeleton(token);
-    if (skelA.length >= 2 && skelA === skelB) return true;
+    if (skelA.length >= 3 && skelA === skelB) return true;
   }
   return false;
 };
@@ -590,7 +595,7 @@ Happy recording!`);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [followEnabled, setFollowEnabled] = useState(false);
-  const [lookaheadWindow, setLookaheadWindow] = useState(18);
+  const [lookaheadWindow, setLookaheadWindow] = useState(12);
   const [centerPaddingVh, setCenterPaddingVh] = useState(45);
   const [showCenterLine, setShowCenterLine] = useState(false);
   const [showAim, setShowAim] = useState(true);
@@ -658,7 +663,7 @@ Happy recording!`);
   const skippableWordsRef = useRef([]);
   const skipCoHostRef = useRef(true);
   const resetTriggerWordRef = useRef("pickle");
-  const lookaheadWindowRef = useRef(18);
+  const lookaheadWindowRef = useRef(12);
   const keydownRef = useRef(null);
   const lastResetTriggerTsRef = useRef(0);
   const isListeningRef = useRef(false);
@@ -775,12 +780,12 @@ Happy recording!`);
       lastMicResultTsRef.current = nowTs;
 
       let startIndex = Math.max(currentWordIndexRef.current + 1, 0);
-      const isNearStart = currentWordIndexRef.current < 5;
+      const isAtVeryStart = currentWordIndexRef.current < 0;
       const liveLookahead = lookaheadWindowRef.current;
-      const effectiveWindow = isNearStart
-        ? Math.max(liveLookahead, 30)
+      const effectiveWindow = isAtVeryStart
+        ? Math.max(liveLookahead, 14)
         : liveLookahead;
-      const effectiveSoftSkip = isNearStart ? 6 : 3;
+      const effectiveSoftSkip = isAtVeryStart ? 3 : 1;
 
       const matchWindow = (tokensSlice, fromIdx) => {
         const lineIdx = getLineIdxForWord(fromIdx);
@@ -821,10 +826,10 @@ Happy recording!`);
 
         nextIndex = matchWindow(tokensToUse, startIndex);
 
-        // If a multi-word burst arrived at once (common on the first spoken
-        // line while the mic initializes), walk forward through earlier
-        // tokens in the burst so the opening words aren't skipped over.
-        if (nextIndex === -1 && recent.length > 1) {
+        // If the very first utterance arrived as a multi-word burst while the
+        // mic initialized, walk through the opening tokens once so line 1 isn't
+        // missed — but never do this mid-script, where it can compound jumps.
+        if (nextIndex === -1 && isAtVeryStart && recent.length > 1) {
           let walkIdx = -1;
           let curStart = startIndex;
           for (let end = Math.min(3, recent.length); end <= recent.length; end++) {
@@ -944,7 +949,7 @@ Happy recording!`);
     textColor: "#ffffff",
     highlightColor: "#ffeb3b",
     followEnabled: false,
-    lookaheadWindow: 18,
+    lookaheadWindow: 12,
     centerPaddingVh: 45,
     showAim: true,
     showHighlight: false,
@@ -1816,12 +1821,14 @@ Happy recording!`);
       }
     }
 
-    // Soft 3-gram then 2-gram match (allows 1 accented/fuzzy word in a multi-word phrase)
+    // Soft 3-gram then 2-gram match (allows 1 accented/fuzzy word in a multi-word phrase,
+    // restricted to a closer window so common words don't jump ahead across lines)
+    const softPhraseIdx = searchIdx.slice(0, Math.min(searchIdx.length, 8));
     for (let n = Math.min(3, candidates.length); n >= 2; n--) {
       const seq = candidates.slice(-n);
-      for (const i of searchIdx) {
+      for (const i of softPhraseIdx) {
         let ok = true;
-        let exactCount = 0;
+        let exactLongCount = 0;
         for (let k = 0; k < n; k++) {
           const target = normalizedWordsRef.current[i + k];
           const targetSkel = phoneticWordsRef.current[i + k];
@@ -1831,13 +1838,13 @@ Happy recording!`);
             break;
           }
           if (tokensEqual(target, token)) {
-            exactCount++;
+            if (target.length >= 3) exactLongCount++;
           } else if (!tokensSoftMatch(target, token, targetSkel)) {
             ok = false;
             break;
           }
         }
-        if (ok && exactCount >= 1) return { index: i + (n - 1), nUsed: n };
+        if (ok && exactLongCount >= 1) return { index: i + (n - 1), nUsed: n };
       }
     }
 
@@ -1849,8 +1856,9 @@ Happy recording!`);
       if (tokensEqual(target, t1)) return { index: i, nUsed: 1 };
     }
 
-    // soft matches (prefix/contains) within soft limit
-    for (const i of softIdx) {
+    // soft matches only on the immediate next word (or very start) so single fuzzy words never skip ahead
+    const immediateIdx = searchIdx.slice(0, 1);
+    for (const i of immediateIdx) {
       const target = normalizedWordsRef.current[i];
       const targetSkel = phoneticWordsRef.current[i];
       if (tokensSoftMatch(target, t1, targetSkel)) return { index: i, nUsed: 1 };
@@ -1909,7 +1917,8 @@ Happy recording!`);
         }
       }
       if (allowSoft) {
-        for (let i = localStart; i <= le - 1; i++) {
+        const softPairEnd = Math.min(le - 1, localStart + 5);
+        for (let i = localStart; i <= softPairEnd; i++) {
           const a = normalizedWordsRef.current[i];
           const b = normalizedWordsRef.current[i + 1];
           const skelA = phoneticWordsRef.current[i];
@@ -1917,7 +1926,8 @@ Happy recording!`);
           if (
             tokensSoftMatch(a, seq2[0], skelA) &&
             tokensSoftMatch(b, seq2[1], skelB) &&
-            (tokensEqual(a, seq2[0]) || tokensEqual(b, seq2[1]))
+            ((tokensEqual(a, seq2[0]) && a.length >= 3) ||
+              (tokensEqual(b, seq2[1]) && b.length >= 3))
           ) {
             return i + 1;
           }
@@ -1931,12 +1941,10 @@ Happy recording!`);
         const w = normalizedWordsRef.current[i];
         if (tokensEqual(w, t)) return i;
       }
-      if (allowSoft) {
-        for (let i = localStart; i <= softLimit; i++) {
-          const w = normalizedWordsRef.current[i];
-          const skelW = phoneticWordsRef.current[i];
-          if (w && tokensSoftMatch(w, t, skelW)) return i;
-        }
+      if (allowSoft && localStart <= le) {
+        const w = normalizedWordsRef.current[localStart];
+        const skelW = phoneticWordsRef.current[localStart];
+        if (w && tokensSoftMatch(w, t, skelW)) return localStart;
       }
     }
     return -1;
@@ -2850,26 +2858,6 @@ Happy recording!`);
           </IconButton>
 
           <IconButton uiOpacity={uiOpacity}
-            onClick={() => setShowEditor(!showEditor)}
-            ariaLabel="Script Editor"
-            tooltipTitle="Script Editor (S)"
-            tooltipDesc="Toggle script editor"
-            style={{
-              background: showEditor ? "#1565c0" : "#1f2937",
-              border: "1px solid rgba(255,255,255,0.25)",
-              width: "auto",
-              height: 48,
-              padding: "0 16px",
-              gap: "8px",
-              fontWeight: "bold",
-              fontSize: "15px",
-            }}
-          >
-            <Icon name={"pencil-square"} />
-            <span>Edit Script</span>
-          </IconButton>
-
-          <IconButton uiOpacity={uiOpacity}
             onClick={() => setShowSettings(!showSettings)}
             ariaLabel="Settings"
             tooltipTitle="Settings (E)"
@@ -2929,6 +2917,26 @@ Happy recording!`);
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z" />
             </svg>
+          </IconButton>
+
+          <IconButton uiOpacity={uiOpacity}
+            onClick={() => setShowEditor(!showEditor)}
+            ariaLabel="Script Editor"
+            tooltipTitle="Script Editor (S)"
+            tooltipDesc="Toggle script editor"
+            style={{
+              background: showEditor ? "#1565c0" : "#1f2937",
+              border: "1px solid rgba(255,255,255,0.25)",
+              width: "auto",
+              height: 48,
+              padding: "0 16px",
+              gap: "8px",
+              fontWeight: "bold",
+              fontSize: "15px",
+            }}
+          >
+            <Icon name={"pencil-square"} />
+            <span>Edit Script</span>
           </IconButton>
         </div>
       </div>
