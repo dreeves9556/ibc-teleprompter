@@ -340,17 +340,6 @@ Happy recording!`);
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
   const languageBtnRef = useRef(null);
   const [languageMenuPos, setLanguageMenuPos] = useState({ top: 0, left: 0 });
-  const [showSupportMessage, setShowSupportMessage] = useState(() => {
-    try {
-      const saved = localStorage.getItem(
-        "smartTeleprompterSupportMessageDismissed"
-      );
-      return saved !== "true";
-    } catch (error) {
-      console.error("Failed to load support message state:", error);
-      return true;
-    }
-  });
   const [isIOSChrome, setIsIOSChrome] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -1848,27 +1837,6 @@ Happy recording!`);
     }
   }, [language]);
 
-  // Save support message dismissal to localStorage when it changes
-  useEffect(() => {
-    if (typeof window !== "undefined" && window.localStorage) {
-      try {
-        localStorage.setItem(
-          "smartTeleprompterSupportMessageDismissed",
-          showSupportMessage ? "false" : "true"
-        );
-        console.log(
-          "Support message state saved to localStorage:",
-          showSupportMessage
-        );
-      } catch (error) {
-        console.error(
-          "Failed to save support message state to localStorage:",
-          error
-        );
-      }
-    }
-  }, [showSupportMessage]);
-
   // Close menus when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -2666,33 +2634,6 @@ Happy recording!`);
               <path d="M6 12h.001" />
               <path d="M18 12h.001" />
               <path d="M8 16h8" />
-            </svg>
-          </IconButton>
-
-          <IconButton uiOpacity={uiOpacity}
-            onClick={() =>
-              window.open("https://buymeacoffee.com/nrjsoeq61", "_blank")
-            }
-            ariaLabel="Buy Me a Coffee"
-            tooltipTitle="Buy Me a Coffee"
-            tooltipDesc="Support development with a coffee"
-            style={{ background: "#0f0f0f" }}
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M18 8h1a4 4 0 0 1 0 8h-1" />
-              <path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z" />
-              <line x1="6" y1="1" x2="6" y2="4" />
-              <line x1="10" y1="1" x2="10" y2="4" />
-              <line x1="14" y1="1" x2="14" y2="4" />
             </svg>
           </IconButton>
 
@@ -4503,74 +4444,6 @@ Happy recording!`);
         >
           <span aria-hidden="true">🎙️</span>
           Listening...
-        </div>
-      )}
-
-      {/* Support Message */}
-      {showSupportMessage && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: "20px",
-            right: "20px",
-            background: "rgba(0,0,0,0.8)",
-            color: "white",
-            padding: "12px 16px",
-            borderRadius: "8px",
-            fontSize: "12px",
-            maxWidth: "calc(100vw - 40px)",
-            textAlign: "center",
-            border: "1px solid rgba(255,255,255,0.1)",
-            opacity: 0.7,
-          }}
-        >
-          <button
-            onClick={() => setShowSupportMessage(false)}
-            style={{
-              position: "absolute",
-              top: "4px",
-              right: "6px",
-              background: "transparent",
-              border: "none",
-              color: "white",
-              fontSize: "14px",
-              cursor: "pointer",
-              padding: "2px",
-              borderRadius: "2px",
-              width: "16px",
-              height: "16px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-            title="Close support message"
-          >
-            ×
-          </button>
-          <div style={{ marginBottom: "8px", fontWeight: "bold" }}>
-            Enjoying Smart Teleprompter?
-          </div>
-          <div style={{ marginBottom: "8px" }}>
-            Support development with a coffee ☕
-          </div>
-          <button
-            onClick={() =>
-              window.open("https://buymeacoffee.com/nrjsoeq61", "_blank")
-            }
-            style={{
-              background: "#D1AA17",
-              color: "white",
-              border: "none",
-              padding: "6px 12px",
-              borderRadius: "4px",
-              fontSize: "11px",
-              fontWeight: "bold",
-              cursor: "pointer",
-              width: "100%",
-            }}
-          >
-            Buy Me a Coffee
-          </button>
         </div>
       )}
 
