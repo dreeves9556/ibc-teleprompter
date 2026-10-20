@@ -611,6 +611,12 @@ Happy recording!`);
   // Co-host lines (">>" / "@Name:") — dim them and let voice tracking skip them
   const [skipCoHostLines, setSkipCoHostLines] = useState(true);
   const [resetTriggerWord, setResetTriggerWord] = useState("pickle");
+  const [selectedMicId, setSelectedMicId] = useState("default");
+  const [micDevices, setMicDevices] = useState([]);
+  const [activeMicLabel, setActiveMicLabel] = useState("");
+  const [micSensitivity, setMicSensitivity] = useState(75);
+  const [micLevel, setMicLevel] = useState(0);
+  const [isTestingMic, setIsTestingMic] = useState(false);
   const [lineIsCoHost, setLineIsCoHost] = useState([]);
   // Toolbar overflow hints (mobile): which directions have hidden icons
   const [toolbarHints, setToolbarHints] = useState({
@@ -664,6 +670,12 @@ Happy recording!`);
   const skipCoHostRef = useRef(true);
   const resetTriggerWordRef = useRef("pickle");
   const lookaheadWindowRef = useRef(12);
+  const selectedMicIdRef = useRef("default");
+  const micSensitivityRef = useRef(75);
+  const micPeakLevelRef = useRef(100);
+  const audioStreamRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const micMeterRafRef = useRef(null);
   const keydownRef = useRef(null);
   const lastResetTriggerTsRef = useRef(0);
   const isListeningRef = useRef(false);
@@ -683,6 +695,111 @@ Happy recording!`);
   const lastMicResultTsRef = useRef(performance.now());
   const micForceStoppedRef = useRef(false);
   const micRestartTimeoutRef = useRef(null);
+
+  function stopMicStream() {
+    if (micMeterRafRef.current) {
+      cancelAnimationFrame(micMeterRafRef.current);
+      micMeterRafRef.current = null;
+    }
+    if (audioStreamRef.current) {
+      try {
+        audioStreamRef.current.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+      audioStreamRef.current = null;
+    }
+    if (audioContextRef.current) {
+      try {
+        audioContextRef.current.close?.();
+      } catch (_) {}
+      audioContextRef.current = null;
+    }
+    setMicLevel(0);
+    micPeakLevelRef.current = 100;
+  }
+
+  async function refreshMicDevices(requestPermission = false) {
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.enumerateDevices
+    )
+      return;
+    try {
+      if (requestPermission && navigator.mediaDevices.getUserMedia) {
+        const tempStream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+        });
+        tempStream.getTracks().forEach((t) => t.stop());
+      }
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const inputs = all.filter((d) => d.kind === "audioinput");
+      setMicDevices(inputs);
+    } catch (_) {}
+  }
+
+  async function startMicStream(deviceId) {
+    stopMicStream();
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    )
+      return null;
+    try {
+      const targetId = deviceId ?? selectedMicIdRef.current;
+      const constraints =
+        targetId && targetId !== "default"
+          ? { audio: { deviceId: { ideal: targetId } } }
+          : { audio: true };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      audioStreamRef.current = stream;
+      const track = stream.getAudioTracks()[0];
+      if (track && track.label) {
+        setActiveMicLabel(track.label);
+      }
+      refreshMicDevices(false);
+
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (AudioCtx) {
+        const ctx = new AudioCtx();
+        audioContextRef.current = ctx;
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.5;
+        source.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        let lastUiUpdate = 0;
+
+        const updateMeter = (ts) => {
+          if (!audioStreamRef.current) return;
+          analyser.getByteTimeDomainData(data);
+          let sumSq = 0;
+          for (let i = 0; i < data.length; i++) {
+            const norm = (data[i] - 128) / 128;
+            sumSq += norm * norm;
+          }
+          const rms = Math.sqrt(sumSq / data.length);
+          const pct = Math.min(100, Math.round(rms * 320));
+          // Keep a short-decay peak so speech recognition results arriving
+          // ~150ms after the spoken word see the level from when it was spoken
+          micPeakLevelRef.current = Math.max(
+            pct,
+            micPeakLevelRef.current * 0.92
+          );
+          if (ts - lastUiUpdate > 60) {
+            setMicLevel(pct);
+            lastUiUpdate = ts;
+          }
+          micMeterRafRef.current = requestAnimationFrame(updateMeter);
+        };
+        micMeterRafRef.current = requestAnimationFrame(updateMeter);
+      }
+      return stream;
+    } catch (_) {
+      return null;
+    }
+  }
 
   function hardStopRecognition() {
     try {
@@ -742,6 +859,27 @@ Happy recording!`);
       let idx = event.results.length - 1;
       const chosen = event.results[idx];
       if (!chosen || !chosen[0]) return;
+
+      // Sensitivity / Noise Gate filter:
+      // micSensitivity is 10..100 (default 75). Higher sensitivity = lower gate threshold.
+      const sens = micSensitivityRef.current;
+      const gateThreshold = Math.max(0, Math.round((100 - sens) * 0.55));
+      if (
+        audioStreamRef.current &&
+        gateThreshold > 0 &&
+        micPeakLevelRef.current < gateThreshold
+      ) {
+        return;
+      }
+      const minConfidence = Math.max(0, (70 - sens) / 100);
+      if (
+        minConfidence > 0 &&
+        typeof chosen[0].confidence === "number" &&
+        chosen[0].confidence > 0 &&
+        chosen[0].confidence < minConfidence
+      ) {
+        return;
+      }
 
       const altTranscripts = [];
       for (let a = 0; a < chosen.length; a++) {
@@ -928,7 +1066,23 @@ Happy recording!`);
           const startNow = performance.now();
           lastMicResultTsRef.current = startNow;
           window.__lastMicResultTs = startNow;
-          recognitionRef.current && recognitionRef.current.start();
+          if (recognitionRef.current) {
+            const track =
+              audioStreamRef.current &&
+              audioStreamRef.current.getAudioTracks &&
+              audioStreamRef.current.getAudioTracks()[0];
+            if (
+              track &&
+              selectedMicIdRef.current &&
+              selectedMicIdRef.current !== "default"
+            ) {
+              try {
+                recognitionRef.current.start(track);
+                return;
+              } catch (_) {}
+            }
+            recognitionRef.current.start();
+          }
         } catch (_) {}
       }, Math.max(0, delayMs));
     } catch (_) {}
@@ -960,6 +1114,8 @@ Happy recording!`);
     showListeningIndicator: true,
     skipCoHostLines: true,
     resetTriggerWord: "pickle",
+    selectedMicId: "default",
+    micSensitivity: 75,
     textOpacity: 0.8,
     aimOpacity: 1,
     uiOpacity: 0.9,
@@ -991,6 +1147,8 @@ Happy recording!`);
     setShowListeningIndicator(defaultSettings.showListeningIndicator);
     setSkipCoHostLines(defaultSettings.skipCoHostLines);
     setResetTriggerWord(defaultSettings.resetTriggerWord);
+    setSelectedMicId(defaultSettings.selectedMicId);
+    setMicSensitivity(defaultSettings.micSensitivity);
     setTextOpacity(defaultSettings.textOpacity);
     setAimOpacity(defaultSettings.aimOpacity);
     setUiOpacity(defaultSettings.uiOpacity);
@@ -1235,6 +1393,9 @@ Happy recording!`);
       if (s.skipCoHostLines != null) setSkipCoHostLines(s.skipCoHostLines);
       if (typeof s.resetTriggerWord === "string")
         setResetTriggerWord(s.resetTriggerWord);
+      if (typeof s.selectedMicId === "string")
+        setSelectedMicId(s.selectedMicId);
+      if (s.micSensitivity != null) setMicSensitivity(s.micSensitivity);
       if (s.textOpacity != null) setTextOpacity(s.textOpacity);
       if (s.aimOpacity != null) setAimOpacity(s.aimOpacity);
       if (s.uiOpacity != null) setUiOpacity(s.uiOpacity);
@@ -1283,6 +1444,8 @@ Happy recording!`);
         showListeningIndicator,
         skipCoHostLines,
         resetTriggerWord,
+        selectedMicId,
+        micSensitivity,
         textOpacity,
         aimOpacity,
         uiOpacity,
@@ -1320,6 +1483,8 @@ Happy recording!`);
     showListeningIndicator,
     skipCoHostLines,
     resetTriggerWord,
+    selectedMicId,
+    micSensitivity,
     textOpacity,
     aimOpacity,
     uiOpacity,
@@ -1341,6 +1506,36 @@ Happy recording!`);
   useEffect(() => {
     lookaheadWindowRef.current = lookaheadWindow;
   }, [lookaheadWindow]);
+
+  useEffect(() => {
+    selectedMicIdRef.current = selectedMicId;
+  }, [selectedMicId]);
+
+  useEffect(() => {
+    micSensitivityRef.current = micSensitivity;
+  }, [micSensitivity]);
+
+  useEffect(() => {
+    if (!showSettings) {
+      if (isTestingMic) setIsTestingMic(false);
+      if (!isListeningRef.current) stopMicStream();
+      return;
+    }
+    refreshMicDevices(false);
+    const onDeviceChange = () => refreshMicDevices(false);
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.mediaDevices &&
+      navigator.mediaDevices.addEventListener
+    ) {
+      navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+      return () =>
+        navigator.mediaDevices.removeEventListener(
+          "devicechange",
+          onDeviceChange
+        );
+    }
+  }, [showSettings, isTestingMic]);
 
   // Toolbar overflow hints: on narrow screens the toolbar scrolls
   // horizontally, but nothing indicated that more icons exist off-screen.
@@ -1975,6 +2170,7 @@ Happy recording!`);
       try {
         recognitionRef.current && recognitionRef.current.stop();
       } catch (_) {}
+      stopMicStream();
     };
   }, []);
 
@@ -2000,6 +2196,7 @@ Happy recording!`);
       setIsListening(false);
       setIsPlaying(false);
       hardStopRecognition();
+      if (!isTestingMic) stopMicStream();
     } else {
       try {
         // Recreate a fresh instance and start
@@ -2021,6 +2218,7 @@ Happy recording!`);
           currentWordIndexRef.current = -1;
           setCurrentWordIndex(-1);
         }
+        startMicStream(selectedMicIdRef.current);
         safeRestartRecognition(150);
         setIsListening(true);
         setIsPlaying(false);
@@ -2073,6 +2271,7 @@ Happy recording!`);
     if (isListening) {
       recognitionRef.current.stop();
       setIsListening(false);
+      if (!isTestingMic) stopMicStream();
     }
   };
 
@@ -3588,6 +3787,206 @@ Happy recording!`);
                 >
                   Say this word aloud while listening to jump back to the top
                   (leave blank to disable)
+                </div>
+              </div>
+
+              {/* Microphone Settings */}
+              <div
+                style={{
+                  marginBottom: "20px",
+                  padding: "14px",
+                  borderRadius: "10px",
+                  background: "#161616",
+                  border: "1px solid #333",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginBottom: "10px",
+                  }}
+                >
+                  <label
+                    htmlFor="mic-device-select"
+                    style={{
+                      color: "white",
+                      fontWeight: "bold",
+                      fontSize: "14px",
+                    }}
+                  >
+                    🎙️ Microphone
+                  </label>
+                  <button
+                    onClick={() => refreshMicDevices(true)}
+                    style={{
+                      background: "#2a2a2a",
+                      border: "1px solid #555",
+                      color: "#ccc",
+                      padding: "4px 10px",
+                      borderRadius: "6px",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                    }}
+                    title="Detect connected microphones"
+                  >
+                    Detect Mics
+                  </button>
+                </div>
+
+                {activeMicLabel && (
+                  <div
+                    style={{
+                      color: "#81c784",
+                      fontSize: "12px",
+                      marginBottom: "8px",
+                    }}
+                  >
+                    Active input: <strong>{activeMicLabel}</strong>
+                  </div>
+                )}
+
+                <select
+                  id="mic-device-select"
+                  aria-label="Microphone device"
+                  value={selectedMicId}
+                  onChange={(e) => {
+                    const nextId = e.target.value;
+                    setSelectedMicId(nextId);
+                    selectedMicIdRef.current = nextId;
+                    if (isListening || isTestingMic) {
+                      startMicStream(nextId).then(() => {
+                        if (isListening) safeRestartRecognition(100);
+                      });
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid #555",
+                    background: "#222",
+                    color: "white",
+                    fontSize: "13px",
+                    marginBottom: "12px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <option value="default">System Default Microphone</option>
+                  {micDevices
+                    .filter((d) => d.deviceId && d.deviceId !== "default")
+                    .map((d, idx) => (
+                      <option key={d.deviceId} value={d.deviceId}>
+                        {d.label || `Microphone ${idx + 1}`}
+                      </option>
+                    ))}
+                </select>
+
+                {/* Live Input Level & Test Button */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "10px",
+                    marginBottom: "12px",
+                  }}
+                >
+                  <button
+                    onClick={() => {
+                      if (isTestingMic) {
+                        setIsTestingMic(false);
+                        if (!isListening) stopMicStream();
+                      } else {
+                        setIsTestingMic(true);
+                        startMicStream(selectedMicId);
+                      }
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #555",
+                      background: isTestingMic ? "#d32f2f" : "#1565c0",
+                      color: "white",
+                      cursor: "pointer",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {isTestingMic ? "Stop Test" : "Test Mic"}
+                  </button>
+                  <div
+                    style={{
+                      flex: 1,
+                      height: "14px",
+                      background: "#0a0a0a",
+                      borderRadius: "7px",
+                      overflow: "hidden",
+                      position: "relative",
+                      border: "1px solid #333",
+                    }}
+                    title="Live microphone volume level (white marker shows noise gate threshold)"
+                  >
+                    <div
+                      style={{
+                        width: `${micLevel}%`,
+                        height: "100%",
+                        background:
+                          micLevel > 75
+                            ? "#ef5350"
+                            : micLevel > 35
+                              ? "#ffeb3b"
+                              : "#4caf50",
+                        transition: "width 0.06s linear",
+                      }}
+                    />
+                    {/* Noise gate threshold line */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        bottom: 0,
+                        left: `${Math.max(0, Math.round((100 - micSensitivity) * 0.55))}%`,
+                        width: "2px",
+                        background: "rgba(255,255,255,0.7)",
+                      }}
+                    />
+                  </div>
+                  <span
+                    style={{
+                      color: "#aaa",
+                      fontSize: "12px",
+                      minWidth: "34px",
+                      textAlign: "right",
+                    }}
+                  >
+                    {micLevel}%
+                  </span>
+                </div>
+
+                <label
+                  style={{
+                    color: "white",
+                    display: "block",
+                    marginBottom: "8px",
+                    fontSize: "13px",
+                  }}
+                >
+                  Mic sensitivity: {micSensitivity}%
+                </label>
+                <CustomSlider
+                  value={micSensitivity}
+                  min={10}
+                  max={100}
+                  step={5}
+                  onChange={setMicSensitivity}
+                />
+                <div
+                  style={{ color: "#aaa", fontSize: "11px", marginTop: "6px" }}
+                >
+                  Lower sensitivity raises the noise gate (white line on meter)
+                  to ignore quiet background chatter.
                 </div>
               </div>
 
