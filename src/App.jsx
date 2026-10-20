@@ -306,7 +306,7 @@ Happy recording!`);
   const [currentWordIndex, setCurrentWordIndex] = useState(-1);
   const [isPlaying, setIsPlaying] = useState(false);
   const [followEnabled, setFollowEnabled] = useState(false);
-  const [lookaheadWindow, setLookaheadWindow] = useState(10);
+  const [lookaheadWindow, setLookaheadWindow] = useState(18);
   const [userIsInteracting, setUserIsInteracting] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [centerPaddingVh, setCenterPaddingVh] = useState(45);
@@ -460,7 +460,7 @@ Happy recording!`);
         (typeof navigator !== "undefined" && navigator.language
           ? navigator.language
           : "en-US");
-      rec.maxAlternatives = 1;
+      rec.maxAlternatives = 5;
     } catch (_) {}
 
     rec.onstart = () => {
@@ -469,30 +469,27 @@ Happy recording!`);
     };
 
     rec.onresult = (event) => {
-      // Αν έχουμε ήδη transcript που τρέχει, μην περιμένεις final
-      const hasInterim =
-        event.results.length > 0 &&
-        !event.results[event.results.length - 1].isFinal;
-
-      // Πάρε πρώτα το πιο πρόσφατο interim (πιο γρήγορο)
       let idx = event.results.length - 1;
-      const latestResult = event.results[idx];
+      const chosen = event.results[idx];
+      if (!chosen || !chosen[0]) return;
 
-      // Χρησιμοποίησε interim αν υπάρχει, αλλιώς ψάξε για final
-      const chosen = latestResult;
+      const altTranscripts = [];
+      for (let a = 0; a < chosen.length; a++) {
+        const t = chosen[a] && chosen[a].transcript ? chosen[a].transcript : "";
+        if (t) altTranscripts.push(t);
+      }
+      if (altTranscripts.length === 0) return;
 
-      const transcript =
-        chosen && chosen[0] && chosen[0].transcript ? chosen[0].transcript : "";
-
-      // Split σε tokens ΑΜΑ υπάρχει τουλάχιστον μία λέξη
-      const tokens = transcript.split(/\s+/).map(normalizeWord).filter(Boolean);
-      if (tokens.length === 0) return;
+      const altTokenLists = altTranscripts
+        .map((t) => expandDialectTokens(t.split(/\s+/).map(normalizeWord).filter(Boolean)))
+        .filter((arr) => arr.length > 0);
+      if (altTokenLists.length === 0) return;
 
       const triggerToken = normalizeWord(resetTriggerWordRef.current || "");
       if (
         triggerToken &&
-        tokens.some(
-          (tok) => tok === triggerToken || tok === `${triggerToken}s`
+        altTokenLists.some((list) =>
+          list.some((tok) => tok === triggerToken || tok === `${triggerToken}s`)
         )
       ) {
         const now = performance.now();
@@ -504,11 +501,7 @@ Happy recording!`);
         return;
       }
 
-      const isFinal = !!(chosen && chosen.isFinal);
-
-      // ΝΕΟΣ ΚΩΔΙΚΑΣ: Για interim results, χρησιμοποίησε μόνο την τελευταία λέξη
-      const tokensToUse =
-        !isFinal && tokens.length > 1 ? tokens.slice(-1) : tokens;
+      const isFinal = !!chosen.isFinal;
 
       // mic activity indicator
       setIsSpeaking(true);
@@ -522,30 +515,37 @@ Happy recording!`);
       const startIndex = Math.max(currentWordIndexRef.current + 1, 0);
       const currentLine = getLineIdxForWord(currentWordIndexRef.current);
 
-      // Χρησιμοποίησε τα tokens που έχουμε υπολογίσει
-      let nextIndex = findNextInLine(
-        tokensToUse,
-        startIndex,
-        currentLine,
-        6,
-        2, // Always allow soft match για πιο aggressive matching
-        true
-      );
-      if (nextIndex === -1)
+      let nextIndex = -1;
+      for (const tokens of altTokenLists) {
+        const tokensToUse =
+          !isFinal && tokens.length > 3 ? tokens.slice(-3) : tokens;
+
         nextIndex = findNextInLine(
           tokensToUse,
           startIndex,
           currentLine,
-          undefined,
-          2,
-          true // Always allow soft match
+          6,
+          3,
+          true
         );
-      if (nextIndex === -1) {
-        const { index } = tryAdvanceByTokens(tokensToUse, startIndex, {
-          maxWindow: lookaheadWindow,
-          maxSoftSkip: 2, // Πιο aggressive για αγγλικά
-        });
-        nextIndex = index;
+        if (nextIndex === -1) {
+          nextIndex = findNextInLine(
+            tokensToUse,
+            startIndex,
+            currentLine,
+            undefined,
+            3,
+            true
+          );
+        }
+        if (nextIndex === -1) {
+          const { index } = tryAdvanceByTokens(tokensToUse, startIndex, {
+            maxWindow: lookaheadWindow,
+            maxSoftSkip: 3,
+          });
+          nextIndex = index;
+        }
+        if (nextIndex !== -1) break;
       }
       if (nextIndex !== -1) setCurrentWordIndex(nextIndex);
     };
@@ -634,7 +634,7 @@ Happy recording!`);
     textColor: "#ffffff",
     highlightColor: "#ffeb3b",
     followEnabled: false,
-    lookaheadWindow: 10,
+    lookaheadWindow: 18,
     centerPaddingVh: 45,
     showAim: true,
     showHighlight: false,
@@ -1089,10 +1089,159 @@ Happy recording!`);
     );
   };
 
-  const tokensEqual = (a, b) => a && b && a === b;
+  const MULTI_WORD_CONTRACTIONS = {
+    gonna: ["going", "to"],
+    wanna: ["want", "to"],
+    gotta: ["got", "to"],
+    outta: ["out", "of"],
+    kinda: ["kind", "of"],
+    sorta: ["sort", "of"],
+    oughta: ["ought", "to"],
+    hafta: ["have", "to"],
+    yall: ["you", "all"],
+    yalls: ["your"],
+    allofem: ["all", "of", "them"],
+    lemme: ["let", "me"],
+    gimme: ["give", "me"],
+    dunno: ["dont", "know"],
+    imma: ["i", "am", "going", "to"],
+    ima: ["i", "am", "going", "to"],
+    fixin: ["fixing"],
+    finna: ["fixing", "to"],
+  };
+
+  const DIALECT_EQUIVALENTS = {
+    fer: ["for", "far"],
+    fur: ["for"],
+    yer: ["your", "youre"],
+    yore: ["your", "youre"],
+    are: ["our", "hour"],
+    our: ["are", "hour"],
+    hour: ["our", "are"],
+    all: ["oil"],
+    oil: ["all"],
+    rat: ["right"],
+    rite: ["right"],
+    raht: ["right"],
+    far: ["fire", "for"],
+    fahr: ["fire"],
+    tar: ["tire", "tired"],
+    tahr: ["tire"],
+    git: ["get"],
+    jist: ["just"],
+    jest: ["just"],
+    kin: ["can"],
+    pin: ["pen"],
+    pen: ["pin"],
+    tin: ["ten"],
+    ten: ["tin"],
+    fill: ["feel"],
+    feel: ["fill"],
+    still: ["steel"],
+    steel: ["still"],
+    hill: ["heel", "heal"],
+    sale: ["sell"],
+    sell: ["sale"],
+    tail: ["tell"],
+    tell: ["tail"],
+    wont: ["want"],
+    want: ["wont"],
+    aint: ["isnt", "arent", "am", "hasnt", "havent"],
+    em: ["them"],
+    bout: ["about"],
+    cause: ["because"],
+    cuz: ["because"],
+    cos: ["because"],
+    til: ["until"],
+    nothin: ["nothing"],
+    somethin: ["something"],
+    everythin: ["everything"],
+    anythin: ["anything"],
+    doin: ["doing"],
+    goin: ["going"],
+    comin: ["coming"],
+    sayin: ["saying"],
+    talkin: ["talking"],
+    walkin: ["walking"],
+    workin: ["working"],
+    lookin: ["looking"],
+    thinkin: ["thinking"],
+    tryin: ["trying"],
+    runnin: ["running"],
+    gettin: ["getting"],
+    makin: ["making"],
+    takin: ["taking"],
+  };
+
+  const expandDialectTokens = (tokens) => {
+    const out = [];
+    for (const tok of tokens) {
+      if (!tok) continue;
+      if (MULTI_WORD_CONTRACTIONS[tok]) {
+        out.push(...MULTI_WORD_CONTRACTIONS[tok]);
+      } else {
+        out.push(tok);
+      }
+    }
+    return out;
+  };
+
+  const getPhoneticSkeleton = (word) => {
+    if (!word || word.length < 3) return word;
+    const w = word
+      .replace(/^kn/, "n")
+      .replace(/^wr/, "r")
+      .replace(/^wh/, "w")
+      .replace(/ph/g, "f")
+      .replace(/ck/g, "k")
+      .replace(/dg/g, "j")
+      .replace(/ght/g, "t")
+      .replace(/gh/g, "")
+      .replace(/in$/, "ing");
+    const first = w[0];
+    const rest = w
+      .slice(1)
+      .replace(/[aeiouy]/g, "")
+      .replace(/(.)\1+/g, "$1");
+    return first + rest;
+  };
+
+  const withinEditDistance = (a, b, maxDist) => {
+    const la = a.length;
+    const lb = b.length;
+    if (Math.abs(la - lb) > maxDist) return false;
+    const prev = new Array(lb + 1);
+    const curr = new Array(lb + 1);
+    for (let j = 0; j <= lb; j++) prev[j] = j;
+    for (let i = 1; i <= la; i++) {
+      curr[0] = i;
+      let rowMin = curr[0];
+      for (let j = 1; j <= lb; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        if (curr[j] < rowMin) rowMin = curr[j];
+      }
+      if (rowMin > maxDist) return false;
+      for (let j = 0; j <= lb; j++) prev[j] = curr[j];
+    }
+    return prev[lb] <= maxDist;
+  };
+
+  const tokensEqual = (a, b) => {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.length >= 4 && b.length >= 4 && (a === b + "g" || b === a + "g"))
+      return true;
+    const eqA = DIALECT_EQUIVALENTS[a];
+    if (eqA && eqA.includes(b)) return true;
+    const eqB = DIALECT_EQUIVALENTS[b];
+    if (eqB && eqB.includes(a)) return true;
+    return false;
+  };
+
   const tokensSoftMatch = (target, token) => {
     if (!target || !token) return false;
-    if (target === token) return true;
+    if (tokensEqual(target, token)) return true;
     if (
       token.length >= 3 &&
       (target.startsWith(token) || token.startsWith(target))
@@ -1100,6 +1249,15 @@ Happy recording!`);
       return true;
     if (token.length >= 4 && (target.includes(token) || token.includes(target)))
       return true;
+    if (target.length >= 4 && token.length >= 4) {
+      const maxDist = target.length >= 6 && token.length >= 6 ? 2 : 1;
+      if (withinEditDistance(target, token, maxDist)) return true;
+    }
+    if (target.length >= 3 && token.length >= 3 && target[0] === token[0]) {
+      const skelA = getPhoneticSkeleton(target);
+      const skelB = getPhoneticSkeleton(token);
+      if (skelA.length >= 2 && skelA === skelB) return true;
+    }
     return false;
   };
 
@@ -1565,6 +1723,30 @@ Happy recording!`);
       }
     }
 
+    // Soft 3-gram then 2-gram match (allows 1 accented/fuzzy word in a multi-word phrase)
+    for (let n = Math.min(3, candidates.length); n >= 2; n--) {
+      const seq = candidates.slice(-n);
+      for (const i of searchIdx) {
+        let ok = true;
+        let exactCount = 0;
+        for (let k = 0; k < n; k++) {
+          const target = normalizedWordsRef.current[i + k];
+          const token = seq[k];
+          if (!target || (skip && skip[i + k])) {
+            ok = false;
+            break;
+          }
+          if (tokensEqual(target, token)) {
+            exactCount++;
+          } else if (!tokensSoftMatch(target, token)) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok && exactCount >= 1) return { index: i + (n - 1), nUsed: n };
+      }
+    }
+
     // 1-token equality but restrict jump (first few searchable words only)
     const softIdx = searchIdx.slice(0, Math.max(1, maxSoftSkip + 1));
     const t1 = candidates[candidates.length - 1];
@@ -1620,8 +1802,21 @@ Happy recording!`);
       for (let i = localStart; i <= le - 1; i++) {
         const a = normalizedWordsRef.current[i];
         const b = normalizedWordsRef.current[i + 1];
-        if (a === seq2[0] && b === seq2[1]) {
+        if (tokensEqual(a, seq2[0]) && tokensEqual(b, seq2[1])) {
           return i + 1;
+        }
+      }
+      if (allowSoft) {
+        for (let i = localStart; i <= le - 1; i++) {
+          const a = normalizedWordsRef.current[i];
+          const b = normalizedWordsRef.current[i + 1];
+          if (
+            tokensSoftMatch(a, seq2[0]) &&
+            tokensSoftMatch(b, seq2[1]) &&
+            (tokensEqual(a, seq2[0]) || tokensEqual(b, seq2[1]))
+          ) {
+            return i + 1;
+          }
         }
       }
     }
@@ -1630,7 +1825,7 @@ Happy recording!`);
       const softLimit = Math.min(le, localStart + Math.max(1, maxSoftSkip));
       for (let i = localStart; i <= softLimit; i++) {
         const w = normalizedWordsRef.current[i];
-        if (w === t) return i;
+        if (tokensEqual(w, t)) return i;
       }
       if (allowSoft) {
         for (let i = localStart; i <= softLimit; i++) {
