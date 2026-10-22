@@ -614,7 +614,6 @@ Happy recording!`);
   const [selectedMicId, setSelectedMicId] = useState("default");
   const [micDevices, setMicDevices] = useState([]);
   const [activeMicLabel, setActiveMicLabel] = useState("");
-  const [micSensitivity, setMicSensitivity] = useState(75);
   const [micLevel, setMicLevel] = useState(0);
   const [isTestingMic, setIsTestingMic] = useState(false);
   const [lineIsCoHost, setLineIsCoHost] = useState([]);
@@ -671,8 +670,6 @@ Happy recording!`);
   const resetTriggerWordRef = useRef("pickle");
   const lookaheadWindowRef = useRef(12);
   const selectedMicIdRef = useRef("default");
-  const micSensitivityRef = useRef(75);
-  const micPeakLevelRef = useRef(100);
   const audioStreamRef = useRef(null);
   const audioContextRef = useRef(null);
   const micMeterRafRef = useRef(null);
@@ -714,7 +711,6 @@ Happy recording!`);
       audioContextRef.current = null;
     }
     setMicLevel(0);
-    micPeakLevelRef.current = 100;
   }
 
   async function refreshMicDevices(requestPermission = false) {
@@ -781,12 +777,6 @@ Happy recording!`);
           }
           const rms = Math.sqrt(sumSq / data.length);
           const pct = Math.min(100, Math.round(rms * 320));
-          // Keep a short-decay peak so speech recognition results arriving
-          // ~150ms after the spoken word see the level from when it was spoken
-          micPeakLevelRef.current = Math.max(
-            pct,
-            micPeakLevelRef.current * 0.92
-          );
           if (ts - lastUiUpdate > 60) {
             setMicLevel(pct);
             lastUiUpdate = ts;
@@ -859,27 +849,6 @@ Happy recording!`);
       let idx = event.results.length - 1;
       const chosen = event.results[idx];
       if (!chosen || !chosen[0]) return;
-
-      // Sensitivity / Noise Gate filter:
-      // micSensitivity is 10..100 (default 75). Higher sensitivity = lower gate threshold.
-      const sens = micSensitivityRef.current;
-      const gateThreshold = Math.max(0, Math.round((100 - sens) * 0.55));
-      if (
-        audioStreamRef.current &&
-        gateThreshold > 0 &&
-        micPeakLevelRef.current < gateThreshold
-      ) {
-        return;
-      }
-      const minConfidence = Math.max(0, (70 - sens) / 100);
-      if (
-        minConfidence > 0 &&
-        typeof chosen[0].confidence === "number" &&
-        chosen[0].confidence > 0 &&
-        chosen[0].confidence < minConfidence
-      ) {
-        return;
-      }
 
       const altTranscripts = [];
       for (let a = 0; a < chosen.length; a++) {
@@ -1115,7 +1084,6 @@ Happy recording!`);
     skipCoHostLines: true,
     resetTriggerWord: "pickle",
     selectedMicId: "default",
-    micSensitivity: 75,
     textOpacity: 0.8,
     aimOpacity: 1,
     uiOpacity: 0.9,
@@ -1148,7 +1116,6 @@ Happy recording!`);
     setSkipCoHostLines(defaultSettings.skipCoHostLines);
     setResetTriggerWord(defaultSettings.resetTriggerWord);
     setSelectedMicId(defaultSettings.selectedMicId);
-    setMicSensitivity(defaultSettings.micSensitivity);
     setTextOpacity(defaultSettings.textOpacity);
     setAimOpacity(defaultSettings.aimOpacity);
     setUiOpacity(defaultSettings.uiOpacity);
@@ -1395,7 +1362,6 @@ Happy recording!`);
         setResetTriggerWord(s.resetTriggerWord);
       if (typeof s.selectedMicId === "string")
         setSelectedMicId(s.selectedMicId);
-      if (s.micSensitivity != null) setMicSensitivity(s.micSensitivity);
       if (s.textOpacity != null) setTextOpacity(s.textOpacity);
       if (s.aimOpacity != null) setAimOpacity(s.aimOpacity);
       if (s.uiOpacity != null) setUiOpacity(s.uiOpacity);
@@ -1445,7 +1411,6 @@ Happy recording!`);
         skipCoHostLines,
         resetTriggerWord,
         selectedMicId,
-        micSensitivity,
         textOpacity,
         aimOpacity,
         uiOpacity,
@@ -1484,7 +1449,6 @@ Happy recording!`);
     skipCoHostLines,
     resetTriggerWord,
     selectedMicId,
-    micSensitivity,
     textOpacity,
     aimOpacity,
     uiOpacity,
@@ -1510,10 +1474,6 @@ Happy recording!`);
   useEffect(() => {
     selectedMicIdRef.current = selectedMicId;
   }, [selectedMicId]);
-
-  useEffect(() => {
-    micSensitivityRef.current = micSensitivity;
-  }, [micSensitivity]);
 
   useEffect(() => {
     if (!showSettings) {
@@ -3926,7 +3886,7 @@ Happy recording!`);
                       position: "relative",
                       border: "1px solid #333",
                     }}
-                    title="Live microphone volume level (white marker shows noise gate threshold)"
+                    title="Live microphone volume level"
                   >
                     <div
                       style={{
@@ -3939,17 +3899,6 @@ Happy recording!`);
                               ? "#ffeb3b"
                               : "#4caf50",
                         transition: "width 0.06s linear",
-                      }}
-                    />
-                    {/* Noise gate threshold line */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        bottom: 0,
-                        left: `${Math.max(0, Math.round((100 - micSensitivity) * 0.55))}%`,
-                        width: "2px",
-                        background: "rgba(255,255,255,0.7)",
                       }}
                     />
                   </div>
@@ -3965,29 +3914,6 @@ Happy recording!`);
                   </span>
                 </div>
 
-                <label
-                  style={{
-                    color: "white",
-                    display: "block",
-                    marginBottom: "8px",
-                    fontSize: "13px",
-                  }}
-                >
-                  Mic sensitivity: {micSensitivity}%
-                </label>
-                <CustomSlider
-                  value={micSensitivity}
-                  min={10}
-                  max={100}
-                  step={5}
-                  onChange={setMicSensitivity}
-                />
-                <div
-                  style={{ color: "#aaa", fontSize: "11px", marginTop: "6px" }}
-                >
-                  Lower sensitivity raises the noise gate (white line on meter)
-                  to ignore quiet background chatter.
-                </div>
               </div>
 
               <div style={{ marginBottom: "20px" }}>
